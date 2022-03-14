@@ -1,0 +1,6 @@
+[submodule "fat32"]
+	path = fat32
+	url = ./fat32
+[submodule "kernel"]
+	path = kernel
+	url = ./kernel
