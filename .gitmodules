@@ -3,4 +3,4 @@
 	url = https://github.com/Nginw/fat32.git
 [submodule "kernel"]
 	path = kernel
-	url = https://github.com/Nginw/kernel.git
+	https://github.com/Nginw/kernel.git
