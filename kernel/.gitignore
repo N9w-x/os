@@ -1,0 +1,8 @@
+/.idea/*
+/.vscode/*
+/target/*
+/fat32.img
+/Cargo.lock
+/os.s
+/mount/*
+/mnt/*
