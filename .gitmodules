@@ -1,6 +1,0 @@
-[submodule "fat32"]
-	path = fat32
-	url = https://github.com/Nginw/fat32.git
-[submodule "kernel"]
-	path = kernel
-	url = https://github.com/Nginw/kernel.git
