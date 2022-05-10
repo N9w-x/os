@@ -6,7 +6,7 @@ use core::any::Any;
 use simple_fat32::VFile;
 
 pub use file_descriptor::FileDescriptor;
-pub use fs_info::Dirent;
+pub use fs_info::{Dirent, Kstat};
 pub use inode::{ch_dir, list_apps, open_file};
 pub use inode::{FileType, OpenFlags, OSInode};
 pub use path::WorkPath;
@@ -19,6 +19,7 @@ use crate::mm::UserBuffer;
 mod file_descriptor;
 mod fs_info;
 mod inode;
+mod mount;
 mod path;
 mod pipe;
 mod stdio;

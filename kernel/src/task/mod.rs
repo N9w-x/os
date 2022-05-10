@@ -1,3 +1,25 @@
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+
+use lazy_static::*;
+
+pub use context::TaskContext;
+pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
+pub use manager::{add_task, pid2process, remove_from_pid2process};
+use manager::fetch_task;
+use process::ProcessControlBlock;
+pub use processor::{
+    current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
+    current_user_token, run_tasks, schedule, take_current_task,
+};
+pub use signal::SignalFlags;
+use switch::__switch;
+pub use task::{TaskControlBlock, TaskStatus};
+
+use crate::config::PAGE_SIZE;
+use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
+use crate::mm::{add_free, UserBuffer};
+
 mod context;
 mod id;
 mod manager;
@@ -8,30 +30,10 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
-use crate::fs_fat::{open_file, File, FileType, OSInode, OpenFlags};
-use alloc::sync::Arc;
-use alloc::vec::Vec;
-use lazy_static::*;
-use manager::fetch_task;
-use process::ProcessControlBlock;
-use switch::__switch;
-
-use crate::config::PAGE_SIZE;
-use crate::mm::{add_free, UserBuffer};
-pub use context::TaskContext;
-pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
-pub use manager::{add_task, pid2process, remove_from_pid2process};
-pub use processor::{
-    current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
-    current_user_token, run_tasks, schedule, take_current_task,
-};
-pub use signal::SignalFlags;
-pub use task::{TaskControlBlock, TaskStatus};
-
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
-
+    
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
@@ -113,7 +115,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
 lazy_static! {
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("/", "initproc", OpenFlags::RDONLY, FileType::Normal).unwrap();
+        let inode = open_file("/", "initproc", OpenFlags::RDONLY, FileType::Regular).unwrap();
         let v = inode.read_all();
         ProcessControlBlock::new(v.as_slice())
     };
@@ -154,7 +156,7 @@ pub fn add_initproc_into_fs() {
     // println!("Write apps(initproc & user_shell) to disk from mem ");
 
     //Write apps(initproc & user_shell) to disk from mem
-    match open_file("/", "initproc", OpenFlags::CREATE, FileType::Normal) {
+    match open_file("/", "initproc", OpenFlags::CREATE, FileType::Regular) {
         None => panic!("initproc create fail!"),
         Some(inode) => {
             // println!("Create initproc ");
@@ -170,8 +172,8 @@ pub fn add_initproc_into_fs() {
             // println!("Init_proc OK");
         }
     }
-
-    match open_file("/", "user_shell", OpenFlags::CREATE, FileType::Normal) {
+    
+    match open_file("/", "user_shell", OpenFlags::CREATE, FileType::Regular) {
         None => panic!("user_shell create fail!"),
         Some(inode) => {
             // println!("Create user_shell ");

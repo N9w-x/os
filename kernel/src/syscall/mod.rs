@@ -5,6 +5,9 @@ use thread::*;
 
 use crate::syscall::utils::sys_uname;
 
+const SYSCALL_UMOUNT2: usize = 39;
+const SYSCALL_MOUNT: usize = 40;
+const SYSCALL_FSTAT: usize = 80;
 const SYSCALL_GET_DENTS64: usize = 61;
 const SYSCALL_TIMES: usize = 153;
 const SYSCALL_UNAME: usize = 160;
@@ -45,9 +48,6 @@ const SYSCALL_CONDVAR_WAIT: usize = 1032;
 //file system
 const SYSCALL_LINK_AT: usize = 37;
 const SYSCALL_UNLINK_AT: usize = 35;
-const SYSCALL_UMOUNT2: usize = 39;
-const SYSCALL_MOUNT: usize = 40;
-const SYSCALL_FSTAT: usize = 80;
 
 //process
 
@@ -69,7 +69,7 @@ mod sync;
 mod thread;
 mod utils;
 
-pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -108,9 +108,15 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_LINK_AT => unimplemented!(),
         SYSCALL_UNLINK_AT => unimplemented!(),
         SYSCALL_MKDIR_AT => sys_mkdir(args[0] as isize, args[1] as *const u8, args[2] as u32),
-        SYSCALL_UMOUNT2 => unimplemented!(),
-        SYSCALL_MOUNT => unimplemented!(),
-        SYSCALL_FSTAT => unimplemented!(),
+        SYSCALL_UMOUNT2 => sys_umount(args[0] as *const u8, args[1] as usize),
+        SYSCALL_MOUNT => sys_mount(
+            args[0] as *const u8,
+            args[1] as *const u8,
+            args[2] as *const u8,
+            args[3] as usize,
+            args[4] as *const u8,
+        ),
+        SYSCALL_FSTAT => sys_fstat(args[0] as isize, args[1] as *const u8),
         SYSCALL_BRK => unimplemented!(),
         SYSCALL_MUNMAP => unimplemented!(),
         SYSCALL_MMAP => unimplemented!(),

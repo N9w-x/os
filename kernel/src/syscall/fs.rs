@@ -7,7 +7,7 @@ use simple_fat32::DIRENT_SZ;
 
 use crate::fs_fat::{
     ch_dir, Dirent, downcast_to_inode, File, FileDescriptor, FileType, get_current_inode,
-    make_pipe, open_file, OpenFlags, OSInode, WorkPath,
+    Kstat, make_pipe, open_file, OpenFlags, OSInode, WorkPath,
 };
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_process, current_task, current_user_token};
@@ -58,32 +58,32 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     let path = translated_str(token, path);
     //rcore-tutorial和ultra os 你们可上点心吧
     let flags = unsafe { OpenFlags::from_bits_unchecked(flags) };
-
     //获取要打开文件的inode
     match if WorkPath::is_abs_path(&path) {
-        open_file("/", &path, flags, FileType::Normal)
+        open_file("/", &path, flags, FileType::Regular)
     } else if fd == AT_FD_CWD {
         let work_path = process.inner_exclusive_access().work_path.to_string();
-        open_file(&work_path, &path, flags, FileType::Normal)
+        open_file(&work_path, &path, flags, FileType::Regular)
     } else {
-        //相对于fd的相对路径
-        let mut inner = process.inner_exclusive_access();
+        ////相对于fd的相对路径
+        let inner = process.inner_exclusive_access();
         let fd_usize = fd as usize;
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-
-        match downcast_to_inode(&inner.fd_table[fd_usize]) {
-            None => {
-                //无法通过fd找到文件,直接返回
-                return -1;
-            }
-            Some(inode) => {
+        //todo rcore tutorial使用的锁和spin::mutex冲突了..
+        let res = inner.fd_table[fd_usize].clone();
+        drop(inner);
+        match res {
+            Some(FileDescriptor::Regular(os_inode)) => {
                 if flags.contains(OpenFlags::CREATE) {
-                    inode.create(&path, FileType::Normal)
+                    os_inode.create(&path, FileType::Regular)
                 } else {
-                    inode.find(&path, flags)
+                    os_inode.find(&path, flags)
                 }
+            }
+            _ => {
+                return -1;
             }
         }
     } {
@@ -92,6 +92,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
             let mut inner = process.inner_exclusive_access();
             let ret_fd = inner.alloc_fd();
             inner.fd_table[ret_fd] = Some(FileDescriptor::Regular(os_inode));
+            drop(inner);
             ret_fd as isize
         }
     }
@@ -158,7 +159,6 @@ pub fn sys_chdir(path: *const u8) -> isize {
 
     //获取当前线程的work path
     let mut current_path = inner.work_path.to_string();
-    //fixme chdir中存在来源不明的加锁,不drop会导致系统panic
     drop(inner);
     //尝试切换目录
     let ret = ch_dir(&current_path, &path);
@@ -177,14 +177,26 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let pcb = current_process();
     let path = translated_str(token, path);
 
-    // todo 修改fd,获取具体的os inode类型
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::CREATE, FileType::Dir)
     } else if dir_fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
         open_file(&work_path, &path, OpenFlags::CREATE, FileType::Dir)
     } else {
-        todo!()
+        let mut inner = pcb.inner_exclusive_access();
+        let fd_usize = dir_fd as usize;
+        if fd_usize >= inner.fd_table.len() {
+            return -1;
+        }
+    
+        if let Some(FileDescriptor::Regular(os_inode)) = inner.fd_table[fd_usize].clone() {
+            if !os_inode.is_dir() {
+                return -1;
+            }
+            os_inode.create(&path, FileType::Regular)
+        } else {
+            return -1;
+        }
     } {
         None => -1,
         Some(_) => 0,
@@ -215,7 +227,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let dirent_size = core::mem::size_of::<Dirent>();
     let mut total_read = 0;
-    
+
     //我为什么会喜欢这种写法(
     let dir_inode = if fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
@@ -250,5 +262,30 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
         0
     } else {
         dirent_size as isize
+    }
+}
+
+//暂时不支持挂载(开摆
+pub fn sys_mount(
+    special: *const u8,
+    dir: *const u8,
+    fstype: *const u8,
+    flags: usize,
+    data: *const u8,
+) -> isize {
+    0
+}
+
+pub fn sys_umount(special: *const u8, flags: usize) -> isize {
+    0
+}
+
+pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
+    let size = core::mem::size_of::<Kstat>();
+    let token = current_user_token();
+    let mut user_buf = UserBuffer::new(translated_byte_buffer(token, kstat, size));
+    match user_buf.write(Kstat::default().as_bytes()) {
+        0 => -1,
+        _ => 0,
     }
 }

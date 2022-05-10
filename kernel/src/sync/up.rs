@@ -1,7 +1,8 @@
 use core::cell::{RefCell, RefMut, UnsafeCell};
 use core::ops::{Deref, DerefMut};
-use riscv::register::sstatus;
+
 use lazy_static::*;
+use riscv::register::sstatus;
 
 /*
 /// Wrap a static data structure inside it so that we are
@@ -56,9 +57,8 @@ pub struct IntrMaskingInfo {
 }
 
 lazy_static! {
-    static ref INTR_MASKING_INFO: UPSafeCellRaw<IntrMaskingInfo> = unsafe {
-        UPSafeCellRaw::new(IntrMaskingInfo::new()) 
-    };
+    static ref INTR_MASKING_INFO: UPSafeCellRaw<IntrMaskingInfo> =
+        unsafe { UPSafeCellRaw::new(IntrMaskingInfo::new()) };
 }
 
 impl IntrMaskingInfo {
@@ -71,7 +71,9 @@ impl IntrMaskingInfo {
 
     pub fn enter(&mut self) {
         let sie = sstatus::read().sie();
-        unsafe { sstatus::clear_sie(); }
+        unsafe {
+            sstatus::clear_sie();
+        }
         if self.nested_level == 0 {
             self.sie_before_masking = sie;
         }
@@ -81,11 +83,14 @@ impl IntrMaskingInfo {
     pub fn exit(&mut self) {
         self.nested_level -= 1;
         if self.nested_level == 0 && self.sie_before_masking {
-            unsafe { sstatus::set_sie(); }            
+            unsafe {
+                sstatus::set_sie();
+            }
         }
     }
 }
 
+// fixme conflict with spin::Mutex
 pub struct UPIntrFreeCell<T> {
     /// inner data
     inner: RefCell<T>,
@@ -106,8 +111,11 @@ impl<T> UPIntrFreeCell<T> {
         INTR_MASKING_INFO.get_mut().enter();
         UPIntrRefMut(Some(self.inner.borrow_mut()))
     }
-
-    pub fn exclusive_session<F, V>(&self, f: F) -> V where F: FnOnce(&mut T) -> V {
+    
+    pub fn exclusive_session<F, V>(&self, f: F) -> V
+        where
+            F: FnOnce(&mut T) -> V,
+    {
         let mut inner = self.exclusive_access();
         f(inner.deref_mut())
     }
@@ -131,4 +139,3 @@ impl<'a, T> DerefMut for UPIntrRefMut<'a, T> {
         self.0.as_mut().unwrap().deref_mut()
     }
 }
-

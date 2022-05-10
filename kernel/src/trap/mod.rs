@@ -1,18 +1,22 @@
-mod context;
+use core::arch::{asm, global_asm};
+
+use riscv::register::{
+    mtvec::TrapMode,
+    scause::{self, Exception, Interrupt, Trap},
+    sie, sscratch, sstatus, stval, stvec,
+};
+
+pub use context::TrapContext;
 
 use crate::config::TRAMPOLINE;
 use crate::syscall::syscall;
 use crate::task::{
     check_signals_of_current, current_add_signal, current_trap_cx, current_trap_cx_user_va,
-    current_user_token, exit_current_and_run_next, suspend_current_and_run_next, SignalFlags,
+    current_user_token, exit_current_and_run_next, SignalFlags, suspend_current_and_run_next,
 };
 use crate::timer::{check_timer, set_next_trigger};
-use core::arch::{asm, global_asm};
-use riscv::register::{
-    mtvec::TrapMode,
-    scause::{self, Exception, Interrupt, Trap},
-    sie, stval, stvec, sstatus, sscratch,
-};
+
+mod context;
 
 global_asm!(include_str!("trap.S"));
 
@@ -23,7 +27,7 @@ pub fn init() {
 fn set_kernel_trap_entry() {
     extern "C" {
         fn __alltraps();
-        fn __alltraps_k(); 
+        fn __alltraps_k();
     }
     let __alltraps_k_va = __alltraps_k as usize - __alltraps as usize + TRAMPOLINE;
     unsafe {
@@ -52,7 +56,7 @@ fn enable_supervisor_interrupt() {
 
 fn disable_supervisor_interrupt() {
     unsafe {
-        sstatus::clear_sie(); 
+        sstatus::clear_sie();
     }
 }
 
@@ -67,11 +71,14 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-            
+    
             enable_supervisor_interrupt();
-
+    
             // get system call return value
-            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
+            let result = syscall(
+                cx.x[17],
+                [cx.x[10], cx.x[11], cx.x[12], cx.x[13], cx.x[14], cx.x[15]],
+            );
             // cx is changed during sys_exec, so we have to call it again
             cx = current_trap_cx();
             cx.x[10] = result as usize;
@@ -150,20 +157,19 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
     match scause.cause() {
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
             crate::board::irq_handler();
-        },
+        }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
             // do not schedule now
-        },
+        }
         _ => {
             panic!(
                 "Unsupported trap from kernel: {:?}, stval = {:#x}!",
                 scause.cause(),
                 stval
             );
-        },
+        }
     }
 }
 
-pub use context::TrapContext;

@@ -98,11 +98,11 @@ impl OSInode {
             }
         }
     }
-    
+
     pub fn find(&self, path: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
         let inner = self.inner.lock();
         let path_split = path.split('/').collect();
-        
+
         inner.inode.find_vfile_bypath(path_split).map(|inode| {
             let (readable, writable) = flags.read_write();
             Arc::new(OSInode::new(readable, writable, inode.clone()))
@@ -119,7 +119,7 @@ impl OSInode {
             } else {
                 DTYPE_UNKNOWN
             };
-            
+    
             dirent.fill_info(
                 &name,
                 first_clu as u64,
@@ -127,7 +127,7 @@ impl OSInode {
                 (offset as usize - inner.offset) as u16,
                 d_type,
             );
-            
+    
             inner.offset = offset as usize;
             let len = (name.len() + 8 * 4) as isize;
             len
@@ -237,14 +237,14 @@ pub fn list_apps() {
 
 pub enum FileType {
     Dir,
-    Normal,
+    Regular,
 }
 
 impl Into<u8> for FileType {
     fn into(self) -> u8 {
         match self {
             FileType::Dir => ATTRIBUTE_DIRECTORY,
-            FileType::Normal => ATTRIBUTE_ARCHIVE,
+            FileType::Regular => ATTRIBUTE_ARCHIVE,
         }
     }
 }

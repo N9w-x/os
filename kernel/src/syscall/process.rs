@@ -99,7 +99,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         &work_path,
         path.as_str(),
         OpenFlags::RDONLY,
-        FileType::Normal,
+        FileType::Regular,
     ) {
         let all_data = app_inode.read_all();
         let process = current_process();
