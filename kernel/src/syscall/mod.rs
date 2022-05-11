@@ -2,9 +2,9 @@ use fs::*;
 use process::*;
 use sync::*;
 use thread::*;
+use utils::*;
 
-use crate::syscall::utils::sys_uname;
-
+const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_UMOUNT2: usize = 39;
 const SYSCALL_MOUNT: usize = 40;
 const SYSCALL_FSTAT: usize = 80;
@@ -15,6 +15,7 @@ const SYSCALL_MKDIR_AT: usize = 34;
 const SYSCALL_GETCWD: usize = 17;
 const SYSCALL_CHDIR: usize = 49;
 const SYSCALL_DUP: usize = 23;
+
 const SYSCALL_DUP3: usize = 24;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
@@ -59,9 +60,8 @@ const SYSCALL_MMAP: usize = 222;
 //utils
 
 // 待修改
-const SYSCALL_FORK: usize = 220;
+const SYSCALL_CLONE: usize = 220;
 const SYSCALL_EXEC: usize = 221;
-const SYSCALL_SLEEP: usize = 101;
 
 mod fs;
 mod process;
@@ -79,13 +79,13 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_READ => sys_read(args[0], args[1] as *const u8, args[2]),
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
-        SYSCALL_SLEEP => sys_sleep(args[0]),
+        SYSCALL_SLEEP => sys_sleep(args[0] as *const u64, args[1] as *mut u64),
         SYSCALL_YIELD => sys_yield(),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
         SYSCALL_GET_TIME_OF_DAY => sys_get_time_of_day(args[0] as *mut u64),
         SYSCALL_GETPID => sys_getpid(),
         SYSCALL_GET_PPID => sys_getppid(),
-        SYSCALL_FORK => sys_fork(),
+        SYSCALL_CLONE => sys_fork(),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
         SYSCALL_THREAD_CREATE => sys_thread_create(args[0], args[1]),
