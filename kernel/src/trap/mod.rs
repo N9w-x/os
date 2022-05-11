@@ -8,7 +8,7 @@ use riscv::register::{
 
 pub use context::TrapContext;
 
-use crate::config::TRAMPOLINE;
+use crate::{config::TRAMPOLINE, trap::lazy::lazy_check};
 use crate::syscall::syscall;
 use crate::task::{
     check_signals_of_current, current_add_signal, current_trap_cx, current_trap_cx_user_va,
@@ -17,6 +17,7 @@ use crate::task::{
 use crate::timer::{check_timer, set_next_trigger};
 
 mod context;
+mod lazy;
 
 global_asm!(include_str!("trap.S"));
 
@@ -83,12 +84,8 @@ pub fn trap_handler() -> ! {
             cx = current_trap_cx();
             cx.x[10] = result as usize;
         }
-        Trap::Exception(Exception::StoreFault)
-        | Trap::Exception(Exception::StorePageFault)
-        | Trap::Exception(Exception::InstructionFault)
-        | Trap::Exception(Exception::InstructionPageFault)
-        | Trap::Exception(Exception::LoadFault)
-        | Trap::Exception(Exception::LoadPageFault) => {
+        Trap::Exception(Exception::InstructionFault)
+        | Trap::Exception(Exception::InstructionPageFault) => {
             /*
             println!(
                 "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.",
@@ -98,6 +95,19 @@ pub fn trap_handler() -> ! {
             );
             */
             current_add_signal(SignalFlags::SIGSEGV);
+        }
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
+            println!(
+                "[kernel] {:?} in application, bad addr = {:#x}.",
+                scause.cause(),
+                stval,
+            );
+            if !lazy_check(stval) {
+                current_add_signal(SignalFlags::SIGSEGV);
+            }
         }
         Trap::Exception(Exception::IllegalInstruction) => {
             current_add_signal(SignalFlags::SIGILL);

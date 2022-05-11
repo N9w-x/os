@@ -160,3 +160,16 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
         -1
     }
 }
+
+pub fn sys_brk(addr: usize) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    if addr == 0 {
+        inner.heap_end.0 as isize
+    } else if addr < inner.heap_base.0 {
+        -1
+    } else {;
+        inner.heap_end = addr.into();
+        addr as isize
+    }
+}

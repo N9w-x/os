@@ -4,7 +4,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
-use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut};
+use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut, VirtAddr};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 
@@ -36,6 +36,10 @@ pub struct ProcessControlBlockInner {
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
     //工作目录
     pub work_path: WorkPath,
+    // user_heap
+    pub heap_base: VirtAddr,
+    pub heap_end: VirtAddr,
+
 }
 impl ProcessControlBlockInner {
     #[allow(unused)]
@@ -85,7 +89,7 @@ impl ProcessControlBlock {
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -112,6 +116,8 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: WorkPath::new(),
+                    heap_base: uheap_base.into(),
+                    heap_end: uheap_base.into(),
                 })
             },
         });
@@ -148,10 +154,13 @@ impl ProcessControlBlock {
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
         // substitute memory_set
         self.inner_exclusive_access().memory_set = memory_set;
+        // 重新设置堆大小
+        self.inner.exclusive_access().heap_base = uheap_base.into();
+        self.inner.exclusive_access().heap_end = uheap_base.into();
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
@@ -234,6 +243,8 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: path,
+                    heap_base: parent.heap_base,
+                    heap_end: parent.heap_end,
                 })
             },
         });

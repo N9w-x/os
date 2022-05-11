@@ -2,7 +2,7 @@ use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE};
+use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE};
 use crate::sync::UPIntrFreeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -36,6 +36,7 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    heap: BTreeMap<VirtPageNum, FrameTracker>,
 }
 
 impl MemorySet {
@@ -43,6 +44,7 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            heap: BTreeMap::new(),
         }
     }
     pub fn token(&self) -> usize {
@@ -165,7 +167,7 @@ impl MemorySet {
     }
     /// Include sections in elf and trampoline,
     /// also returns user_sp_base and entry point.
-    pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
+    pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize, usize) {
         let mut memory_set = Self::new_bare();
         // map trampoline
         memory_set.map_trampoline();
@@ -201,11 +203,12 @@ impl MemorySet {
             }
         }
         let max_end_va: VirtAddr = max_end_vpn.into();
-        let mut user_stack_base: usize = max_end_va.into();
-        user_stack_base += PAGE_SIZE;
+        let mut user_heap_base: usize = max_end_va.into();
+        user_heap_base += PAGE_SIZE;
         (
             memory_set,
-            user_stack_base,
+            user_heap_base,
+            USER_STACK_BASE,
             elf.header.pt2.entry_point() as usize,
         )
     }
@@ -241,6 +244,14 @@ impl MemorySet {
     pub fn recycle_data_pages(&mut self) {
         //*self = Self::new_bare();
         self.areas.clear();
+    }
+
+    pub fn lazy_alloc_heap(&mut self, va: VirtAddr) {
+        let vpn: VirtPageNum = va.floor();
+        let frame = frame_alloc().unwrap();
+        let ppn = frame.ppn;
+        self.page_table.map(vpn, ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+        self.heap.insert(vpn, frame);
     }
 }
 
