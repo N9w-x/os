@@ -41,6 +41,8 @@ DISASM ?= -x
 
 build: env switch-check $(KERNEL_BIN) #fs-img
 
+build-pull: env switch-check $(KERNEL_BIN)
+
 switch-check:
 ifeq ($(BOARD), qemu)
 	(which last-qemu) || (rm -f last-k210 && touch last-qemu && make clean)
@@ -70,9 +72,12 @@ $(KERNEL_BIN): kernel
 fs-img: $(APPS)
 	@
 
-fs-img-lite:
-	@
-
+img-lite:
+	@rm -rf fat32.img
+	@mkfs.vfat -n "test" -F 32 -C fat32.img 40960
+	@sudo mount -o loop -t vfat fat32.img mnt
+	@sudo cp -r  ../fat32-fuse/sd_mnt2/* ./mnt
+	@sudo umount ./mnt
 
 $(APPS):
 
@@ -80,6 +85,12 @@ kernel:
 	@echo Platform: $(BOARD)
 	@cp src/linker-$(BOARD).ld src/linker.ld
 	@cargo build --release --features "board_$(BOARD)"
+	@rm src/linker.ld
+
+# for match test
+kernel-pull:
+	@cp src/linker-$(BOARD).ld src/linker.ld
+	@cargo build --release --features --offline "board_$(BOARD)"
 	@rm src/linker.ld
 
 clean:
@@ -127,4 +138,4 @@ gdbserver: build
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
-.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient fs-img-lite
+.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull
