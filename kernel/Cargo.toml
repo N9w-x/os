@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 riscv = { git = "https://github.com/rcore-os/riscv", features = ["inline-asm"] }
-lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
+lazy_static = { path = "../3rd_party/lazy_static", features = ["spin_no_std"] }
 buddy_system_allocator = { path = "../3rd_party/buddy_system_allocator" }
 bitflags = { path = "../3rd_party/bitflags" }
 xmas-elf = "0.7.0"
