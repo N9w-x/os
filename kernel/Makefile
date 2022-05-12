@@ -90,7 +90,7 @@ kernel:
 # for match test
 kernel-pull:
 	@cp src/linker-$(BOARD).ld src/linker.ld
-	@cargo build --release --features --offline "board_$(BOARD)"
+	@cargo build --release --offline --features  "board_$(BOARD)"
 	@rm src/linker.ld
 
 clean:
