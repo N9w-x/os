@@ -5,8 +5,8 @@ use lazy_static::*;
 
 pub use context::TaskContext;
 pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
-pub use manager::{add_task, pid2process, remove_from_pid2process};
-use manager::fetch_task;
+pub use info::CloneFlag;
+pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
 pub use processor::{
     current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
@@ -22,6 +22,7 @@ use crate::mm::{add_free, UserBuffer};
 
 mod context;
 mod id;
+mod info;
 mod manager;
 mod process;
 mod processor;

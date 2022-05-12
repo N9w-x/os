@@ -85,6 +85,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_GET_TIME_OF_DAY => sys_get_time_of_day(args[0] as *mut u64),
         SYSCALL_GETPID => sys_getpid(),
         SYSCALL_GET_PPID => sys_getppid(),
+        //SYSCALL_CLONE => sys_clone(args[0], args[1], args[2], args[3], args[4]),
         SYSCALL_CLONE => sys_fork(),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),

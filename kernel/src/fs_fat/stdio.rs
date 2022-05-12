@@ -2,6 +2,7 @@ use crate::drivers::chardev::CharDevice;
 use crate::fs_fat::File;
 use crate::mm::UserBuffer;
 use crate::sbi::console_getchar;
+use crate::task::suspend_current_and_run_next;
 
 pub struct Stdin;
 
@@ -15,12 +16,21 @@ impl File for Stdin {
     fn writable(&self) -> bool {
         false
     }
-    
+
     fn read(&self, mut buf: UserBuffer) -> usize {
         assert_eq!(buf.len(), 1);
-        let ch = console_getchar() as u8;
+        let mut c;
+        loop {
+            c = console_getchar();
+            if c == 0 {
+                suspend_current_and_run_next();
+                continue;
+            } else {
+                break;
+            }
+        }
         unsafe {
-            buf.buffers[0].as_mut_ptr().write_volatile(ch);
+            buf.buffers[0].as_mut_ptr().write_volatile(c as u8);
         }
         1
     }

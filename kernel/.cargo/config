@@ -1,3 +1,17 @@
+#[source.crates-io]
+#replace-with = "vendored-sources"
+#
+##[source."https://github.com/rcore-os/riscv"]
+##git = "https://github.com/rcore-os/riscv"
+##replace-with = "vendored-sources"
+##
+##[source."https://github.com/rcore-os/virtio-drivers"]
+##git = "https://github.com/rcore-os/virtio-drivers"
+##replace-with = "vendored-sources"
+#
+#[source.vendored-sources]
+#directory = "../3rd_party"
+
 [build]
 target = "riscv64gc-unknown-none-elf"
 

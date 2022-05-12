@@ -6,8 +6,8 @@ use crate::config::CLOCK_FREQ;
 use crate::fs_fat::{FileType, open_file, OpenFlags};
 use crate::mm::{translated_ref, translated_refmut, translated_str};
 use crate::task::{
-    current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
-    SignalFlags, suspend_current_and_run_next,
+    add_task, CloneFlag, current_process, current_task, current_user_token,
+    exit_current_and_run_next, pid2process, SignalFlags, suspend_current_and_run_next,
 };
 use crate::timer::{get_time, get_time_ms, get_time_us, USEC_PER_SEC};
 
@@ -42,7 +42,7 @@ pub fn sys_get_times(tms: *mut u64) -> isize {
     *translated_refmut(token, unsafe { tms.add(1) }) = usec;
     *translated_refmut(token, unsafe { tms.add(2) }) = usec;
     *translated_refmut(token, unsafe { tms.add(3) }) = usec;
-    
+
     usec as isize
 }
 
@@ -73,6 +73,26 @@ pub fn sys_fork() -> isize {
     // for child process, fork returns 0
     trap_cx.x[10] = 0;
     new_pid as isize
+}
+
+pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: usize) -> isize {
+    let pcb = current_process();
+    let flags = unsafe { CloneFlag::from_bits_unchecked(flags) };
+    let child_pcb = pcb.fork();
+    let child_pid = child_pcb.getpid();
+    
+    if flags.contains(CloneFlag::CLONE_SIGHLD) {}
+    if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) {}
+    if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {}
+    
+    let inner = child_pcb.inner_exclusive_access();
+    let child_task = inner.tasks[0].as_ref().unwrap();
+    let child_trap_cx = child_task.inner.exclusive_access().get_trap_cx();
+    if stack_ptr != 0 {
+        child_trap_cx.kernel_sp = stack_ptr;
+    }
+    child_trap_cx.x[10] = 0;
+    child_pid as isize
 }
 
 pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
