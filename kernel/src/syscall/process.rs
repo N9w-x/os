@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use crate::config::CLOCK_FREQ;
 use crate::fs_fat::{FileType, open_file, OpenFlags};
-use crate::mm::{translated_ref, translated_refmut, translated_str};
+use crate::mm::{translated_ref, translated_refmut, translated_str, align_up};
 use crate::task::{
     add_task, CloneFlag, current_process, current_task, current_user_token,
     exit_current_and_run_next, pid2process, SignalFlags, suspend_current_and_run_next,
@@ -176,6 +176,35 @@ pub fn sys_kill(pid: usize, signal: u32) -> isize {
         } else {
             -1
         }
+    } else {
+        -1
+    }
+}
+
+pub fn sys_brk(addr: usize) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    if addr == 0 {
+        inner.heap_end.0 as isize
+    } else if addr < inner.heap_base.0 {
+        -1
+    } else {;
+        inner.heap_end = addr.into();
+        addr as isize
+    }
+}
+
+pub fn sys_mmap(start: usize, len: usize, prot: usize, flags: usize, fd: usize, offset: usize) -> isize {
+    let align_start = align_up(current_process().inner_exclusive_access().mmap_area_end.0);
+    let align_len = align_up(len);
+    current_process().inner_exclusive_access().mmap(align_start, align_len, prot, flags, fd, offset);
+    align_start as isize
+}
+
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    let align_start = align_up(start);
+    if current_process().inner_exclusive_access().munmap(align_start, len) {
+        0
     } else {
         -1
     }
