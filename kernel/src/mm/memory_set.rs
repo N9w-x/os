@@ -1,8 +1,9 @@
-use super::{frame_alloc, FrameTracker};
+use super::{frame_alloc, FrameTracker, UserBuffer, translated_byte_buffer};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
 use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE};
+use crate::fs_fat::{FileDescriptor, File};
 use crate::sync::UPIntrFreeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -36,7 +37,8 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
-    heap: BTreeMap<VirtPageNum, FrameTracker>,
+    heap: BTreeMap<VirtPageNum, FrameTracker>,  // user heap
+    mmap_areas: Vec<MemoryMapArea>,             // 
 }
 
 impl MemorySet {
@@ -45,6 +47,7 @@ impl MemorySet {
             page_table: PageTable::new(),
             areas: Vec::new(),
             heap: BTreeMap::new(),
+            mmap_areas: Vec::new(),
         }
     }
     pub fn token(&self) -> usize {
@@ -246,12 +249,40 @@ impl MemorySet {
         self.areas.clear();
     }
 
-    pub fn lazy_alloc_heap(&mut self, va: VirtAddr) {
+    pub fn insert_mmap_area(&mut self, mmap_area: MemoryMapArea) {
+        self.mmap_areas.push(mmap_area);
+    }
+
+    pub fn remove_mmap_area(&mut self, start_vpn: VirtPageNum) -> bool {
+        if let Some((idx, area)) = self.mmap_areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn) {
+            area.unmap(&mut self.page_table);
+            self.mmap_areas.remove(idx);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn lazy_alloc_heap(&mut self, va: VirtAddr) -> bool {
         let vpn: VirtPageNum = va.floor();
         let frame = frame_alloc().unwrap();
         let ppn = frame.ppn;
         self.page_table.map(vpn, ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
         self.heap.insert(vpn, frame);
+        true
+    }
+
+    pub fn lazy_alloc_mmap_area(&mut self, va: VirtAddr, fd_table: Vec<Option<FileDescriptor>>) -> bool {
+        let vpn: VirtPageNum = va.floor();
+        if let Some(area) = self.mmap_areas
+            .iter_mut()
+            .find(|area| area.vpn_range.contain(vpn)) {
+            return area.map_one(&mut self.page_table, vpn, fd_table)
+        }
+        false
     }
 }
 
@@ -378,4 +409,73 @@ pub fn remap_test() {
         .unwrap()
         .executable(),);
     println!("remap_test passed!");
+}
+
+pub struct MemoryMapArea {
+    pub vpn_range: VPNRange,
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
+    map_perm: MapPermission,
+    fd: usize,
+    offset: usize,
+    flags: usize,
+}
+
+impl MemoryMapArea {
+    pub fn new(
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        map_perm: MapPermission,
+        fd: usize,
+        offset: usize,
+        flags: usize,
+    ) -> Self {
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        Self {
+            vpn_range: VPNRange::new(start_vpn, end_vpn),
+            data_frames: BTreeMap::new(),
+            map_perm,
+            fd,
+            offset,
+            flags,
+        }
+    }
+
+    pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum, fd_table: Vec<Option<FileDescriptor>>) -> bool {
+        // 分配物理页
+        let ppn: PhysPageNum;
+        let frame = frame_alloc().unwrap();
+        ppn = frame.ppn;
+        self.data_frames.insert(vpn, frame);
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        page_table.map(vpn, ppn, pte_flags);
+
+        // 复制文件数据到内存
+        if let Some(file_descriptor) = &fd_table[self.fd] {
+            match file_descriptor {
+                FileDescriptor::Regular(inode) => {
+                    if inode.readable() {
+                        let va: usize = VirtAddr::from(vpn).into();
+                        let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
+                        let page_offset = va - mmap_base + self.offset;
+                        let buf = translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+                        inode.set_offset(page_offset);
+                        inode.read(UserBuffer::new(buf));
+                        return true;
+                    }
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+    
+    pub fn unmap(&mut self, page_table: &mut PageTable) {
+        for vpn in self.vpn_range {
+            self.data_frames.remove(&vpn);
+            // sys_mmap采取lazy策略, sys_munmap时可能未分配内存, 因此不能unmap
+            // page_table.unmap(vpn);
+        }
+    }
 }

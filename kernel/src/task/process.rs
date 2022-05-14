@@ -3,8 +3,9 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::config::MEMORY_MAP_BASE;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
-use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut, VirtAddr};
+use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut, VirtAddr, MapPermission, MemoryMapArea, VirtPageNum};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 
@@ -39,6 +40,8 @@ pub struct ProcessControlBlockInner {
     // user_heap
     pub heap_base: VirtAddr,
     pub heap_end: VirtAddr,
+    pub mmap_area_base: VirtAddr,
+    pub mmap_area_end: VirtAddr,
 
 }
 impl ProcessControlBlockInner {
@@ -79,6 +82,28 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
+
+    pub fn mmap(&mut self, start: usize, len: usize, prot: usize, flags: usize, fd: usize, offset: usize) {
+        let start_va = start.into();
+        let end_va = (start + len).into();
+        // 测例prot定义与MapPermission正好差一位
+        let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
+
+        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+            start_va,
+            end_va,
+            map_perm,
+            fd,
+            offset,
+            flags,
+        ));
+        self.mmap_area_end = end_va;
+    }
+
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
+        self.memory_set.remove_mmap_area(start_vpn)
+    }
 }
 
 impl ProcessControlBlock {
@@ -118,6 +143,8 @@ impl ProcessControlBlock {
                     work_path: WorkPath::new(),
                     heap_base: uheap_base.into(),
                     heap_end: uheap_base.into(),
+                    mmap_area_base: MEMORY_MAP_BASE.into(),
+                    mmap_area_end: MEMORY_MAP_BASE.into(),
                 })
             },
         });
@@ -161,6 +188,9 @@ impl ProcessControlBlock {
         // 重新设置堆大小
         self.inner.exclusive_access().heap_base = uheap_base.into();
         self.inner.exclusive_access().heap_end = uheap_base.into();
+        // 重新设置mmap_area
+        self.inner.exclusive_access().mmap_area_base = MEMORY_MAP_BASE.into();
+        self.inner.exclusive_access().mmap_area_end = MEMORY_MAP_BASE.into();
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
@@ -245,6 +275,8 @@ impl ProcessControlBlock {
                     work_path: path,
                     heap_base: parent.heap_base,
                     heap_end: parent.heap_end,
+                    mmap_area_base: parent.mmap_area_base,
+                    mmap_area_end: parent.mmap_area_end,
                 })
             },
         });

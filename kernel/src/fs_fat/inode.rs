@@ -69,6 +69,10 @@ impl OSInode {
         self.inner.lock().inode.get_size() as usize
     }
 
+    pub fn set_offset(&self, offset: usize) {
+        self.inner.lock().offset = offset;
+    }
+
     //在当前目录下创建文件
     pub fn create(&self, path: &str, _type: FileType) -> Option<Arc<OSInode>> {
         let inode = self.inner.lock().inode.clone();

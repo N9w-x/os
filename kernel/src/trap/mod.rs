@@ -84,28 +84,20 @@ pub fn trap_handler() -> ! {
             cx = current_trap_cx();
             cx.x[10] = result as usize;
         }
-        Trap::Exception(Exception::InstructionFault)
-        | Trap::Exception(Exception::InstructionPageFault) => {
-            /*
-            println!(
-                "[kernel] {:?} in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.",
-                scause.cause(),
-                stval,
-                current_trap_cx().sepc,
-            );
-            */
+        Trap::Exception(Exception::InstructionFault) | 
+        Trap::Exception(Exception::InstructionPageFault) => {
             current_add_signal(SignalFlags::SIGSEGV);
         }
-        Trap::Exception(Exception::StoreFault)
-        | Trap::Exception(Exception::StorePageFault)
-        | Trap::Exception(Exception::LoadFault)
-        | Trap::Exception(Exception::LoadPageFault) => {
-            println!(
-                "[kernel] {:?} in application, bad addr = {:#x}.",
-                scause.cause(),
-                stval,
-            );
+        Trap::Exception(Exception::StoreFault) | 
+        Trap::Exception(Exception::StorePageFault) | 
+        Trap::Exception(Exception::LoadFault) | 
+        Trap::Exception(Exception::LoadPageFault) => {
             if !lazy_check(stval) {
+                println!(
+                    "[kernel] {:?} in application, bad addr = {:#x}.",
+                    scause.cause(),
+                    stval,
+                );
                 current_add_signal(SignalFlags::SIGSEGV);
             }
         }
