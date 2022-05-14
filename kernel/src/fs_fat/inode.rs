@@ -8,8 +8,8 @@ use simple_fat32::{ATTRIBUTE_DIRECTORY, ATTRIBUTE_LFN, BLOCK_SZ};
 use spin::Mutex;
 
 use crate::drivers::BLOCK_DEVICE;
-use crate::fs_fat::{Dirent, File, get_current_inode};
-use crate::fs_fat::fs_info::{DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN};
+use crate::fs_fat::{Dirent, File, get_current_inode, Kstat};
+use crate::fs_fat::fs_info::{DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, VFSFlag};
 use crate::mm::UserBuffer;
 use crate::task::current_user_token;
 
@@ -112,7 +112,7 @@ impl OSInode {
             Arc::new(OSInode::new(readable, writable, inode.clone()))
         })
     }
-    
+
     pub fn get_dirent(&self, dirent: &mut Dirent) -> isize {
         let mut inner = self.inner.lock();
         if let Some((name, offset, first_clu, attr)) = inner.inode.dirent_info(inner.offset) {
@@ -138,6 +138,29 @@ impl OSInode {
         } else {
             -1
         }
+    }
+    
+    pub fn get_fstat(&self, fstat: &mut Kstat) {
+        let vfile = self.inner.lock().inode.clone();
+        
+        let (size, access_t, modify_t, create_t, inode_num) = vfile.stat();
+        let st_mode = {
+            if vfile.is_dir() {
+                VFSFlag::create_flag(VFSFlag::S_IFDIR, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+            } else {
+                VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+            }
+        }
+            .bits();
+        
+        fstat.update(
+            inode_num,
+            st_mode,
+            size as u32,
+            access_t,
+            modify_t,
+            create_t,
+        );
     }
 }
 

@@ -3,6 +3,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::iter::FromIterator;
 
+use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use simple_fat32::DIRENT_SZ;
 
 use crate::fs_fat::{
@@ -89,10 +90,11 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     } {
         None => -1,
         Some(os_inode) => {
+            //alloc fd and push into fd table
             let mut inner = process.inner_exclusive_access();
             let ret_fd = inner.alloc_fd();
             inner.fd_table[ret_fd] = Some(FileDescriptor::Regular(os_inode));
-            drop(inner);
+            assert!(inner.fd_table[ret_fd].is_some());
             ret_fd as isize
         }
     }
@@ -188,7 +190,7 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-    
+
         if let Some(FileDescriptor::Regular(os_inode)) = inner.fd_table[fd_usize].clone() {
             if !os_inode.is_dir() {
                 return -1;
@@ -284,8 +286,28 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     let size = core::mem::size_of::<Kstat>();
     let token = current_user_token();
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, kstat, size));
-    match user_buf.write(Kstat::default().as_bytes()) {
-        0 => -1,
-        _ => 0,
-    }
+    let pcb = current_process();
+    let mut kstat = Kstat::default();
+    let os_inode = if fd == AT_FD_CWD {
+        let work_path = pcb.inner_exclusive_access().work_path.to_string();
+        match open_file("/", &work_path, OpenFlags::RDONLY, FileType::Regular) {
+            None => return -1,
+            Some(os_inode) => os_inode,
+        }
+    } else {
+        let fd_usize = fd as usize;
+        let inner = pcb.inner_exclusive_access();
+        
+        if fd_usize >= inner.fd_table.len() {
+            return -1;
+        }
+        match &inner.fd_table[fd_usize] {
+            Some(FileDescriptor::Regular(os_inode)) => os_inode.clone(),
+            _ => return -1,
+        }
+    };
+    
+    os_inode.get_fstat(&mut kstat);
+    user_buf.write(kstat.as_bytes());
+    0
 }

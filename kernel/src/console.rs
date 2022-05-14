@@ -32,3 +32,12 @@ macro_rules! println {
         $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
     }
 }
+
+#[macro_export]
+macro_rules! dbg {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        if cfg!(feature = "board_qemu") {
+            $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+        }
+    }
+}
