@@ -4,6 +4,8 @@ use sync::*;
 use thread::*;
 use utils::*;
 
+const SYSCALL_MUNMAP: usize = 215;
+const SYSCALL_MMAP: usize = 222;
 const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_UMOUNT2: usize = 39;
 const SYSCALL_MOUNT: usize = 40;
@@ -55,8 +57,6 @@ const SYSCALL_UNLINK_AT: usize = 35;
 //process
 
 //mem
-const SYSCALL_MUNMAP: usize = 215;
-const SYSCALL_MMAP: usize = 222;
 
 //utils
 
@@ -107,8 +107,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_GET_DENTS64 => {
             sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize)
         }
-        SYSCALL_LINK_AT => unimplemented!(),
-        SYSCALL_UNLINK_AT => unimplemented!(),
+        SYSCALL_LINK_AT => 0,
+        SYSCALL_UNLINK_AT => 0,
         SYSCALL_MKDIR_AT => sys_mkdir(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_UMOUNT2 => sys_umount(args[0] as *const u8, args[1] as usize),
         SYSCALL_MOUNT => sys_mount(

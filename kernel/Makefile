@@ -90,7 +90,7 @@ kernel:
 # for match test
 kernel-pull:
 	@cp src/linker-$(BOARD).ld src/linker.ld
-	@cargo build --release --offline --features  "board_$(BOARD)"
+	@cargo build --offline --release  --features  "board_$(BOARD)"
 	@rm src/linker.ld
 
 clean:
@@ -104,7 +104,7 @@ disasm-vim: kernel
 	@nvim $(DISASM_TMP)
 	@rm $(DISASM_TMP)
 
-run: run-inner
+run: img-lite run-inner
 
 run-inner: build
 ifeq ($(BOARD),qemu)
