@@ -61,7 +61,7 @@ sdcard: fs-img
 	@sudo dd if=/dev/zero of=$(SDCARD) bs=1048576 count=32
 	@sudo dd if=$(FS_IMG) of=$(SDCARD)
 
-$(KERNEL_BIN): kernel
+$(KERNEL_BIN): kernel-pull
 	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
 
 #fs-img: $(APPS)
