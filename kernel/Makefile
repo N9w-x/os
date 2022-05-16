@@ -89,6 +89,7 @@ kernel:
 
 # for match test
 kernel-pull:
+	@echo Platform: $(BOARD)
 	@cp src/linker-$(BOARD).ld src/linker.ld
 	@cargo build --offline --release  --features  "board_$(BOARD)"
 	@rm src/linker.ld
@@ -106,7 +107,7 @@ disasm-vim: kernel
 
 run: img-lite run-inner
 
-run-inner: build
+run-inner: build-pull
 ifeq ($(BOARD),qemu)
 	@qemu-system-riscv64 \
 		-machine virt \
@@ -133,7 +134,14 @@ debug: build
 
 
 gdbserver: build
-	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S
+	@qemu-system-riscv64 \
+		-machine virt \
+		-nographic \
+		-bios $(BOOTLOADER) \
+		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA)\
+		-drive file=$(FS_IMG),if=none,format=raw,id=x0 \
+		-device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
+		-s -S
 
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'

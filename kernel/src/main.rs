@@ -5,9 +5,12 @@
 #![feature(alloc_error_handler)]
 
 extern crate alloc;
-
 #[macro_use]
 extern crate bitflags;
+
+use lazy_static::*;
+
+use sync::UPIntrFreeCell;
 
 #[cfg(feature = "board_k210")]
 #[path = "boards/k210.rs"]
@@ -45,9 +48,6 @@ fn clear_bss() {
     }
 }
 
-use lazy_static::*;
-use sync::UPIntrFreeCell;
-
 lazy_static! {
     pub static ref DEV_NON_BLOCKING_ACCESS: UPIntrFreeCell<bool> = unsafe { UPIntrFreeCell::new(false) };
 }
@@ -60,10 +60,10 @@ pub fn rust_main() -> ! {
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     board::device_init();
-    #[cfg(not(any(feature = "board_k210")))]
     fs_fat::list_apps();
     task::add_initproc();
     *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+    println!("start run tasks");
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }
