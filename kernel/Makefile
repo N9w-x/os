@@ -39,7 +39,7 @@ OBJCOPY := rust-objcopy --binary-architecture=riscv64
 # Disassembly
 DISASM ?= -x
 
-build: env switch-check $(KERNEL_BIN) #fs-img
+build: env $(KERNEL_BIN) #fs-img
 
 build-pull: env switch-check $(KERNEL_BIN)
 
@@ -52,7 +52,7 @@ endif
 
 env:
 	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
-#	cargo install cargo-binutils --vers =0.3.3
+# cargo install cargo-binutils --vers =0.3.3
 	rustup component add rust-src
 	rustup component add llvm-tools-preview
 
@@ -88,11 +88,14 @@ kernel:
 	@rm src/linker.ld
 
 # for match test
-kernel-pull:
+kernel-pull: # user-apps
 	@echo Platform: $(BOARD)
 	@cp src/linker-$(BOARD).ld src/linker.ld
-	@cargo build --offline --release  --features  "board_$(BOARD)"
+	@cargo build --offline --release --features "board_$(BOARD)"
 	@rm src/linker.ld
+
+user-apps:
+	@make -C ../user elf
 
 clean:
 	@cargo clean
@@ -146,4 +149,11 @@ gdbserver: build
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
-.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull
+HANDIN_BIN := ../os.bin
+
+handin-k210: build
+	@cp $(BOOTLOADER) $(BOOTLOADER).copy
+	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
+	@mv $(BOOTLOADER).copy $(HANDIN_BIN)
+
+.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull user-apps handin-k210
