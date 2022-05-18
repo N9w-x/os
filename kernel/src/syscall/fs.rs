@@ -7,8 +7,8 @@ use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use simple_fat32::DIRENT_SZ;
 
 use crate::fs_fat::{
-    ch_dir, Dirent, downcast_to_inode, File, FileDescriptor, FileType, get_current_inode,
-    Kstat, make_pipe, open_file, OpenFlags, OSInode, WorkPath,
+    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, Kstat, make_pipe, open_file,
+    OpenFlags, OSInode, WorkPath,
 };
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_process, current_task, current_user_token};
@@ -103,10 +103,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
 pub fn sys_close(fd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
-    if fd >= inner.fd_table.len() {
-        return -1;
-    }
-    if inner.fd_table[fd].is_none() {
+    if fd >= inner.fd_table.len() || inner.fd_table[fd].is_none() {
         return -1;
     }
     inner.fd_table[fd].take();
@@ -122,8 +119,7 @@ pub fn sys_pipe(pipe: *mut usize) -> isize {
     inner.fd_table[read_fd] = Some(FileDescriptor::Abstract(pipe_read));
     let write_fd = inner.alloc_fd();
     inner.fd_table[write_fd] = Some(FileDescriptor::Abstract(pipe_write));
-    *translated_refmut(token, pipe) = read_fd;
-    *translated_refmut(token, unsafe { pipe.add(1) }) = write_fd;
+    *translated_refmut(token, pipe as *mut [usize; 2]) = [read_fd, write_fd];
     0
 }
 
@@ -250,7 +246,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             _ => return -1,
         }
     };
-    
+
     let read_times = len / DIRENT_SZ;
     let mut dirent = Dirent::default();
     for _ in 0..read_times {
@@ -297,7 +293,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     } else {
         let fd_usize = fd as usize;
         let inner = pcb.inner_exclusive_access();
-        
+    
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
@@ -309,5 +305,36 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     
     os_inode.get_fstat(&mut kstat);
     user_buf.write(kstat.as_bytes());
+    0
+}
+
+pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    let pcb = current_process();
+    
+    match if WorkPath::is_abs_path(&path) {
+        open_file("/", &path, OpenFlags::RDWR, FileType::Regular)
+    } else if fd == AT_FD_CWD {
+        let work_path = pcb.inner_exclusive_access().work_path.to_string();
+        open_file(&work_path, &path, OpenFlags::RDWR, FileType::Regular)
+    } else {
+        let fd_usize = fd as usize;
+        let mut inner = pcb.inner_exclusive_access();
+        
+        if fd_usize >= inner.fd_table.len() {
+            return -1;
+        }
+        
+        match &inner.fd_table[fd_usize] {
+            Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
+            _ => return -1,
+        }
+    } {
+        None => return -1,
+        Some(os_inode) => {
+            os_inode.delete();
+        }
+    }
     0
 }

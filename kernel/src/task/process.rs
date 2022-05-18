@@ -5,7 +5,9 @@ use alloc::vec::Vec;
 
 use crate::config::MEMORY_MAP_BASE;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
-use crate::mm::{KERNEL_SPACE, MemorySet, translated_refmut, VirtAddr, MapPermission, MemoryMapArea, VirtPageNum};
+use crate::mm::{
+    KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_refmut, VirtAddr, VirtPageNum,
+};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 
@@ -42,7 +44,6 @@ pub struct ProcessControlBlockInner {
     pub heap_end: VirtAddr,
     pub mmap_area_base: VirtAddr,
     pub mmap_area_end: VirtAddr,
-
 }
 impl ProcessControlBlockInner {
     #[allow(unused)]
@@ -74,28 +75,31 @@ impl ProcessControlBlockInner {
     pub fn dealloc_tid(&mut self, tid: usize) {
         self.task_res_allocator.dealloc(tid)
     }
-
+    
     pub fn thread_count(&self) -> usize {
         self.tasks.len()
     }
-
+    
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
-
-    pub fn mmap(&mut self, start: usize, len: usize, prot: usize, flags: usize, fd: usize, offset: usize) {
+    
+    pub fn mmap(
+        &mut self,
+        start: usize,
+        len: usize,
+        prot: usize,
+        flags: usize,
+        fd: usize,
+        offset: usize,
+    ) {
         let start_va = start.into();
         let end_va = (start + len).into();
         // 测例prot定义与MapPermission正好差一位
         let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
-
+        
         self.memory_set.insert_mmap_area(MemoryMapArea::new(
-            start_va,
-            end_va,
-            map_perm,
-            fd,
-            offset,
-            flags,
+            start_va, end_va, map_perm, fd, offset, flags,
         ));
         self.mmap_area_end = end_va;
     }

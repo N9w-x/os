@@ -26,6 +26,6 @@ app_0_end:
     .global app_1_end
     .align 3
 app_1_start:
-    .incbin "../fat32-fuse/sd_mnt2/user_shell"
+    .incbin "./user_shell"
 app_1_end:
 

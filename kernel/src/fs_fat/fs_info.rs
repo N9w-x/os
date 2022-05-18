@@ -133,7 +133,7 @@ impl Default for Kstat {
             st_dev: 0,
             st_ino: 0,
             st_mode: flags.bits,
-            st_nlink: 0,
+            st_nlink: 1,
             st_uid: 0,
             st_gid: 0,
             st_rdev: 0,

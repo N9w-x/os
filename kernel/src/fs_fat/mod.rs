@@ -40,6 +40,3 @@ pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
     }
 }
 
-pub fn downcast_to_inode(fd: &dyn Any) -> Option<Arc<OSInode>> {
-    fd.downcast_ref::<Arc<OSInode>>().map(|inode| inode.clone())
-}

@@ -50,7 +50,7 @@ impl WorkPath {
     }
 
     pub fn is_abs_path(path: &str) -> bool {
-        if path == "/" || path.contains("^/") {
+        if path.contains("^/") {
             true
         } else {
             false

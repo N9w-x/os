@@ -92,8 +92,10 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     let child_inner = child_pcb.inner_exclusive_access();
     let child_task = child_inner.tasks[0].as_ref().unwrap();
     let child_trap_cx = child_task.inner.exclusive_access().get_trap_cx();
+    
+    //更改
     if stack_ptr != 0 {
-        child_trap_cx.kernel_sp = stack_ptr;
+        child_trap_cx.x[2] = stack_ptr;
     }
     child_trap_cx.x[10] = 0;
     child_pid as isize
@@ -142,7 +144,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     loop {
         let process = current_process();
         // find a child process
-        
+
         let mut inner = process.inner_exclusive_access();
         if !inner
             .children
@@ -166,7 +168,8 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
             let exit_code = child.inner_exclusive_access().exit_code;
             // ++++ release child PCB
             if (exit_code_ptr as usize) != 0 {
-                *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code;
+                *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code << 8;
+                //不太清楚为什么需要左移8位
             }
             return found_pid as isize;
         } else {
