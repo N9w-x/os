@@ -7,8 +7,9 @@ use riscv::register::{
 };
 
 pub use context::TrapContext;
+pub use lazy::lazy_check;
 
-use crate::{config::TRAMPOLINE, trap::lazy::lazy_check};
+use crate::config::TRAMPOLINE;
 use crate::syscall::syscall;
 use crate::task::{
     check_signals_of_current, current_add_signal, current_trap_cx, current_trap_cx_user_va,

@@ -10,6 +10,7 @@ use crate::task::{
     exit_current_and_run_next, pid2process, SignalFlags, suspend_current_and_run_next,
 };
 use crate::timer::{get_time, get_time_ms, get_time_us, USEC_PER_SEC};
+use crate::trap::lazy_check;
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -220,6 +221,7 @@ pub fn sys_mmap(
         fd,
         offset,
     );
+    lazy_check(align_start);
     align_start as isize
 }
 
