@@ -74,7 +74,7 @@ impl PipeRingBuffer {
     pub fn read_byte(&mut self) -> u8 {
         self.status = RingBufferStatus::Normal;
         let byte = self.array[self.head];
-        self.head = (self.head + 1) & RING_BUFFER_SIZE;
+        self.head = (self.head + 1) % RING_BUFFER_SIZE;
         if self.head == self.tail {
             self.status = RingBufferStatus::Empty
         }

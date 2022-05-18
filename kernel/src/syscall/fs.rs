@@ -110,7 +110,7 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
-pub fn sys_pipe(pipe: *mut usize) -> isize {
+pub fn sys_pipe(pipe: *mut u32) -> isize {
     let process = current_process();
     let token = current_user_token();
     let mut inner = process.inner_exclusive_access();
@@ -119,7 +119,7 @@ pub fn sys_pipe(pipe: *mut usize) -> isize {
     inner.fd_table[read_fd] = Some(FileDescriptor::Abstract(pipe_read));
     let write_fd = inner.alloc_fd();
     inner.fd_table[write_fd] = Some(FileDescriptor::Abstract(pipe_write));
-    *translated_refmut(token, pipe as *mut [usize; 2]) = [read_fd, write_fd];
+    *translated_refmut(token, pipe as *mut [u32; 2]) = [read_fd as u32, write_fd as u32];
     0
 }
 
