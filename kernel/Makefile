@@ -62,7 +62,7 @@ endif
 env:
 	(rustup target list | grep "riscv64gc-unknown-none-elf (installed)") || rustup target add $(TARGET)
 # cargo install cargo-binutils --vers =0.3.3
-	sudo cp $(SHELL_PATH) ./user_shell
+	cp $(SHELL_PATH) ./user_shell
 	rustup component add rust-src
 	rustup component add llvm-tools-preview
 
@@ -103,7 +103,7 @@ kernel-pull: # user-apps
 	@cp src/linker-$(BOARD).ld src/linker.ld
 	@cargo build --offline --release --features "board_$(BOARD)"
 	@rm src/linker.ld
-	@sudo rm -f ./user_shell
+	@rm -f ./user_shell
 
 user-apps:
 	@make -C ../user elf
