@@ -28,9 +28,10 @@ pub fn sys_get_time_of_day(ts: *mut u64) -> isize {
     //    usec: u64,
     //}
     let token = current_user_token();
-    let ticks = get_time();
-    let sec = (ticks / CLOCK_FREQ) as u64;
-    let usec = ((ticks % CLOCK_FREQ) / CLOCK_FREQ * USEC_PER_SEC) as u64;
+    let us = get_time_us() as u64;
+    let sec = us / USEC_PER_SEC as u64;
+    let usec = us % USEC_PER_SEC as u64;
+    // println!("[debug] us:{}, sec: {}, usec: {}", us, sec, usec);
     *translated_refmut(token, ts) = sec;
     *translated_refmut(token, unsafe { ts.add(1) }) = usec;
     0
