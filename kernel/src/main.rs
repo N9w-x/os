@@ -10,6 +10,8 @@ extern crate bitflags;
 
 use lazy_static::*;
 
+use crate::sbi::send_ipi;
+use crate::task::get_hart_id;
 use sync::UPIntrFreeCell;
 
 #[cfg(feature = "board_k210")]
@@ -23,7 +25,7 @@ mod board;
 mod console;
 mod config;
 mod drivers;
-//mod fs;
+mod fs_fat;
 mod lang_items;
 mod mm;
 mod sbi;
@@ -32,7 +34,6 @@ mod syscall;
 mod task;
 mod timer;
 mod trap;
-mod fs_fat;
 
 core::arch::global_asm!(include_str!("entry.asm"));
 core::arch::global_asm!(include_str!("start_app.S"));
@@ -49,21 +50,29 @@ fn clear_bss() {
 }
 
 lazy_static! {
-    pub static ref DEV_NON_BLOCKING_ACCESS: UPIntrFreeCell<bool> = unsafe { UPIntrFreeCell::new(false) };
+    pub static ref DEV_NON_BLOCKING_ACCESS: UPIntrFreeCell<bool> =
+        unsafe { UPIntrFreeCell::new(false) };
 }
 
 #[no_mangle]
 pub fn rust_main() -> ! {
-    clear_bss();
-    mm::init();
-    trap::init();
-    trap::enable_timer_interrupt();
-    timer::set_next_trigger();
-    board::device_init();
-    fs_fat::list_apps();
-    task::add_initproc();
-    *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
-    println!("start run tasks");
-    task::run_tasks();
-    panic!("Unreachable in rust_main!");
+    let hart_id = get_hart_id();
+    println!("hart id {}", hart_id);
+    if hart_id == 0 {
+        clear_bss();
+        mm::init();
+        trap::init();
+        trap::enable_timer_interrupt();
+        timer::set_next_trigger();
+        board::device_init();
+        fs_fat::list_apps();
+        task::add_initproc();
+        *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+        println!("start run tasks");
+        task::run_tasks();
+        panic!("Unreachable in rust_main!");
+    } else {
+        println!("hello from hart {}", hart_id);
+        panic!("do nothing ")
+    }
 }

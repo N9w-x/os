@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use core::iter::FromIterator;
 
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
-use simple_fat32::DIRENT_SZ;
+use fat32::DIRENT_SZ;
 
 use crate::fs_fat::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, Kstat, make_pipe, open_file,

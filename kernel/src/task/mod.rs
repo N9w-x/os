@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 
 pub use context::TaskContext;
-pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
+pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use info::CloneFlag;
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
@@ -17,7 +17,7 @@ use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 use crate::config::PAGE_SIZE;
-use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
+use crate::fs_fat::{open_file, File, FileType, OSInode, OpenFlags};
 use crate::mm::{add_free, UserBuffer};
 
 mod context;
@@ -34,7 +34,7 @@ mod task;
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
-    
+
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
@@ -173,7 +173,7 @@ pub fn add_initproc_into_fs() {
             // println!("Init_proc OK");
         }
     }
-    
+
     match open_file("/", "user_shell", OpenFlags::CREATE, FileType::Regular) {
         None => panic!("user_shell create fail!"),
         Some(inode) => {
@@ -216,4 +216,15 @@ pub fn current_add_signal(signal: SignalFlags) {
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     process_inner.signals |= signal;
+}
+
+pub fn get_hart_id() -> usize {
+    let hart_id;
+    unsafe {
+        core::arch::asm!(
+        "mv {}, tp",
+        out(reg) hart_id
+        );
+    }
+    hart_id
 }

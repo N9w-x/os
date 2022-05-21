@@ -2,14 +2,14 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use fat32::{FAT32Manager, VFile};
+use fat32::{ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY, ATTRIBUTE_LFN, BLOCK_SZ};
 use lazy_static::lazy_static;
-use simple_fat32::{ATTRIBUTE_ARCHIVE, FAT32Manager, VFile};
-use simple_fat32::{ATTRIBUTE_DIRECTORY, ATTRIBUTE_LFN, BLOCK_SZ};
 use spin::Mutex;
 
 use crate::drivers::BLOCK_DEVICE;
-use crate::fs_fat::{Dirent, File, get_current_inode, Kstat};
-use crate::fs_fat::fs_info::{DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, VFSFlag};
+use crate::fs_fat::fs_info::{VFSFlag, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN};
+use crate::fs_fat::{get_current_inode, Dirent, File, Kstat};
 use crate::mm::UserBuffer;
 use crate::task::current_user_token;
 
@@ -123,7 +123,7 @@ impl OSInode {
             } else {
                 DTYPE_UNKNOWN
             };
-    
+
             dirent.fill_info(
                 &name,
                 first_clu as u64,
@@ -131,7 +131,7 @@ impl OSInode {
                 (offset as usize - inner.offset) as u16,
                 d_type,
             );
-    
+
             inner.offset = offset as usize;
             let len = (name.len() + 8 * 4) as isize;
             len
@@ -139,10 +139,10 @@ impl OSInode {
             -1
         }
     }
-    
+
     pub fn get_fstat(&self, fstat: &mut Kstat) {
         let vfile = self.inner.lock().inode.clone();
-        
+
         let (size, access_t, modify_t, create_t, inode_num) = vfile.stat();
         let st_mode = {
             if vfile.is_dir() {
@@ -151,8 +151,8 @@ impl OSInode {
                 VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
             }
         }
-            .bits();
-        
+        .bits();
+
         fstat.update(
             inode_num,
             st_mode,
@@ -293,7 +293,7 @@ pub fn open_file(
         if let Some(inode) = cur_inode.find_vfile_bypath(path_split.clone()) {
             inode.remove();
         }
-    
+
         let filename = path_split.pop().unwrap();
         let dir = cur_inode.find_vfile_bypath(path_split).unwrap();
         let attr = _type.into();

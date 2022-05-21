@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::Any;
 
-use simple_fat32::VFile;
+use fat32::VFile;
 
 pub use file_descriptor::FileDescriptor;
 pub use fs_info::{Dirent, Kstat};

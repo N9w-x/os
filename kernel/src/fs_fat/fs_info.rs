@@ -1,6 +1,6 @@
 use core::slice::from_raw_parts;
 
-use simple_fat32::BLOCK_SZ;
+use fat32::BLOCK_SZ;
 
 pub const DTYPE_DIR: u8 = 4;
 pub const DTYPE_REG: u8 = 4;
