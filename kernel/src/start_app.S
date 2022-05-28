@@ -18,7 +18,7 @@ _app_names:
     .global app_0_end
     .align 3
 app_0_start:
-    .incbin "../fat32-fuse/sd_mnt2/initproc"
+    .incbin "../sdcard_file/initproc"
 app_0_end:
 
     .section .data

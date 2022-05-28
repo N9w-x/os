@@ -20,9 +20,9 @@ K210_BOOTLOADER_SIZE := 131072
 RUN_MODE ?= shell
 #
 ifeq ($(RUN_MODE) , shell)
-	SHELL_PATH := ../fat32-fuse/sd_mnt2/usershells
+	SHELL_PATH := ../sdcard_file/usershells
 else ifeq ($(RUN_MODE) , autotest)
-	SHELL_PATH := ../fat32-fuse/sd_mnt2/user_shell
+	SHELL_PATH := ../sdcard_file/user_shell
 endif
 
 # Building mode argument
@@ -86,7 +86,7 @@ img-lite:
 	@rm -rf fat32.img
 	@mkfs.vfat -n "test" -F 32 -C fat32.img 40960
 	@sudo mount -o loop -t vfat fat32.img mnt
-	@sudo cp -r  ../fat32-fuse/sd_mnt2/* ./mnt
+	@sudo cp -r  ../sdcard_file/* ./mnt
 	@sudo umount ./mnt
 
 $(APPS):
