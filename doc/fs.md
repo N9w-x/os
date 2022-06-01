@@ -1,3 +1,26 @@
+
+# sd卡磁盘结构
+
+默认sd卡磁盘的物理数据布局如下
+
+![这里写图片描述](https://img-blog.csdn.net/20170308200924298?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMDY1MDg0NQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+### MBR(Main Boot Recorder)
+
+448个字节,计算机启动后首先将这个部分的代码载入内存并执行,通常用来解释分区结构
+
+在主引导扇区后有四个DPT(disk partition table 硬盘分区表)
+
+每个DPT都会指向该硬盘分区的扩展分区表(EBR),扩展分区表中会记录该分区中硬盘数据的具体信息
+
+因为我们的系统只有一个分区,所以只需要读取第一个分区的分区表数据就行了
+
+以第一个DPT为例,DPT的16字节中存储了以下数据
+
+![这里写图片描述](https://img-blog.csdn.net/20170308201308112?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvdTAxMDY1MDg0NQ==/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+
+我们的文件系统中主要关注的是0x1c6字节处的分区开始扇区号,它指向该分区的扩展记录表的扇区号,通过它访问fat32文件系统(但是事实上评测机的sd卡没有分区表,直接读EBR就好了)
+
 # fat32
 
 FAT32 将一个卷分为三个区域
@@ -40,7 +63,7 @@ Boot Record 占用每个卷保留区域( Reserved Region)的**0号扇区** 或�
 | ------------ | ----------- | ----------- | ------- |
 | 36           | 0x24        | 1           |         |
 
-
+### 通常所在区块
 
 | sector id | 内容                            |
 | --------- | ------------------------------- |
@@ -48,7 +71,12 @@ Boot Record 占用每个卷保留区域( Reserved Region)的**0号扇区** 或�
 | 1         | FSinfo 包含FAT32 卷一些基本信息 |
 | 6         | BS bak                          |
 | 7         | FSInfo bak                      |
-|           |                                 |
+
+## FAT表
+
+fat系列的文件系统都是用类似鱼链表的方式串联起来的,文件的扇区使用情况通过fat表记录
+
+fat32中每个表项占32个字节,表项中的数据表示终结或者指向当前文件占用的下个扇区号
 
 ## short entry
 
@@ -86,4 +114,56 @@ tips
 ![image-20220115222345634](pic.asset/image-20220115222345634.png)
 
 # 文件缓存
+
+文件系统以块(扇区)为单位进行读写,为了提高磁盘IO的性能,我们参考ultraOS的做法,在文件系统和磁盘数据之间添加了一层缓存层作为代理,以块为单位对磁盘数据进行缓存.读写会优先在缓存中进行查询,如果cache miss了,再从磁盘中实际读取数据。
+
+```rust
+pub struct BlockCache {
+    pub cache: [u8; BLOCK_SZ],
+    block_id: usize,
+    block_device: Arc<dyn BlockDevice>,
+    modified: bool,
+}
+```
+
+使用RAII的思想，将缓存块的生命周期和磁盘数据绑定，当缓存块从内存中被销毁的时候，检查当前块是否修改过，如果修改过就将当前块写回到磁盘中
+
+```rust
+    fn drop(&mut self) {
+        if self.modified {
+            self.block_device.write_block(self.block_id, &self.cache)
+        }
+    }
+```
+
+创建一个计数器对文件缓存的命中率进行测试，在cache访问的入口函数中对访问次数和命中次数进行计数，统计缓存的访问次数和命中次数，最后在系统shutdown的时候输出结果
+
+```rust
+pub struct CacheHitCounter {
+    hit_times: usize,
+    access_times: usize,
+}
+
+impl CacheHitCounter {
+    pub fn add_hit(&mut self) {
+        self.hit_times += 1;
+    }
+    
+    pub fn add_access(&mut self) {
+        self.access_times += 1;
+    }
+}
+```
+
+初步记录的缓存命中情况如下，命中率约为0.62（在运行测试用例这种线性执行的运行环境下,每个文件都只会访问一次,所有的cache hit完全来自于单个文件内部的重复访问,在这样的前提下,缓存命中率能够达到0.62比较令我惊讶了）
+
+![image-20220530135326107](pic.asset/hit_rate_old.png)
+
+
+
+
+
+我们的fat32文件系统目前使用的是ultraos的simple_fat32文件系统,并在他们的基础上进行改动和优化,simple_fat32文件系统在打开文件时,仅仅返回一个包含文件信息的inode节点,并没有实际将文件内容从磁盘中载入内存，lazy的做法确实能够减少内存开销和磁盘IO的开销，但是按照局部性原理的思想，打开的文件更有可能在未来被访问，所以我们做了一个简单的prefetch,以试图提高缓存的命中率,在打开文件时,将指定数量的文件扇区(当前是5个,如果文件扇区数量少于5就所有扇区)加载到cacheManager中,试图提高缓存的命中率
+
+添加prefetch之后的结果数据表明,缓存命中率确实提高了1个百分点(这不就是没提高吗),可能是因为只在打开文件时预加载区块,文件中反复访问的扇区和文件的头几个扇区没有必然关系。同时还发现，添加了prefetch之后，对缓存块的访问次数增加了，推测的原因为添加了prefetch之后，缓存更容易发生换出，所以访问次数也随之增加了。
 
