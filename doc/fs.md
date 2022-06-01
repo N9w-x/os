@@ -167,3 +167,55 @@ impl CacheHitCounter {
 
 添加prefetch之后的结果数据表明,缓存命中率确实提高了1个百分点(这不就是没提高吗),可能是因为只在打开文件时预加载区块,文件中反复访问的扇区和文件的头几个扇区没有必然关系。同时还发现，添加了prefetch之后，对缓存块的访问次数增加了，推测的原因为添加了prefetch之后，缓存更容易发生换出，所以访问次数也随之增加了。
 
+文件系统以块(扇区)为单位进行读写,为了提高磁盘IO的性能,我们参考ultraOS的做法,在文件系统和磁盘数据之间添加了一层缓存层作为代理,以块为单位对磁盘数据进行缓存.读写会优先在缓存中进行查询,如果cache miss了,再从磁盘中实际读取数据。
+
+```rust
+pub struct BlockCache {
+    pub cache: [u8; BLOCK_SZ],
+    block_id: usize,
+    block_device: Arc<dyn BlockDevice>,
+    modified: bool,
+}
+```
+
+使用RAII的思想，将缓存块的生命周期和磁盘数据绑定，当缓存块从内存中被销毁的时候，检查当前块是否修改过，如果修改过就将当前块写回到磁盘中
+
+```rust
+    fn drop(&mut self) {
+        if self.modified {
+            self.block_device.write_block(self.block_id, &self.cache)
+        }
+    }
+```
+
+创建一个计数器对文件缓存的命中率进行测试，在cache访问的入口函数中对访问次数和命中次数进行计数，统计缓存的访问次数和命中次数，最后在系统shutdown的时候输出结果
+
+```rust
+pub struct CacheHitCounter {
+    hit_times: usize,
+    access_times: usize,
+}
+
+impl CacheHitCounter {
+    pub fn add_hit(&mut self) {
+        self.hit_times += 1;
+    }
+    
+    pub fn add_access(&mut self) {
+        self.access_times += 1;
+    }
+}
+```
+
+初步记录的缓存命中情况如下，命中率约为0.62（在运行测试用例这种线性执行的运行环境下,每个文件都只会访问一次,所有的cache hit完全来自于单个文件内部的重复访问,在这样的前提下,缓存命中率能够达到0.62比较令我惊讶了）
+
+![image-20220530135326107](pic.asset/hit_rate_old.png)
+
+
+
+
+
+我们的fat32文件系统目前使用的是ultraos的simple_fat32文件系统,并在他们的基础上进行改动和优化,simple_fat32文件系统在打开文件时,仅仅返回一个包含文件信息的inode节点,并没有实际将文件内容从磁盘中载入内存，lazy的做法确实能够减少内存开销和磁盘IO的开销，但是按照局部性原理的思想，打开的文件更有可能在未来被访问，所以我们做了一个简单的prefetch,以试图提高缓存的命中率,在打开文件时,将指定数量的文件扇区(当前是5个,如果文件扇区数量少于5就所有扇区)加载到cacheManager中,试图提高缓存的命中率
+
+添加prefetch之后的结果数据表明,缓存命中率确实提高了1个百分点(这不就是没提高吗),可能是因为只在打开文件时预加载区块,文件中反复访问的扇区和文件的头几个扇区没有必然关系。同时还发现，添加了prefetch之后，对缓存块的访问次数增加了，推测的原因为添加了prefetch之后，缓存更容易发生换出，所以访问次数也随之增加了。
+
