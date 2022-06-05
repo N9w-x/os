@@ -10,9 +10,10 @@ extern crate bitflags;
 
 use lazy_static::*;
 
-use crate::sbi::send_ipi;
-use crate::task::get_hart_id;
 use sync::UPIntrFreeCell;
+
+use crate::sbi::{hsm_hart_stop, send_ipi};
+use crate::task::{get_hart_id, store_hart_id};
 
 #[cfg(feature = "board_k210")]
 #[path = "boards/k210.rs"]
@@ -56,8 +57,8 @@ lazy_static! {
 
 #[no_mangle]
 pub fn rust_main() -> ! {
+    store_hart_id();
     let hart_id = get_hart_id();
-    println!("hart id {}", hart_id);
     if hart_id == 0 {
         clear_bss();
         mm::init();
@@ -72,7 +73,9 @@ pub fn rust_main() -> ! {
         task::run_tasks();
         panic!("Unreachable in rust_main!");
     } else {
+        //todo 多核调度,目前在启动后仅仅输出hartID,然后停止运行
         println!("hello from hart {}", hart_id);
-        panic!("do nothing ")
+        hsm_hart_stop(hart_id);
+        unreachable!("unreachable in rust_main")
     }
 }
