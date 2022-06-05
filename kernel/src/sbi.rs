@@ -12,6 +12,9 @@ const SBI_REMOTE_SFENCE_VMA: usize = 6;
 const SBI_REMOTE_SFENCE_VMA_ASID: usize = 7;
 const SBI_SHUTDOWN: usize = 8;
 
+const EXTENSION_HSM: usize = 0x48534d;
+const FUNCTION_HSM_HART_SUSPEND: usize = 0x3;
+
 #[inline(always)]
 fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
     let mut ret;
@@ -46,4 +49,17 @@ pub fn shutdown() -> ! {
 
 pub fn send_ipi(mask: usize) {
     sbi_call(SBI_SEND_IPI, mask, 0, 0);
+}
+
+pub fn hart_suspend(suspend_type: usize, resume_addr: usize) -> usize {
+    let ret;
+    unsafe {
+        asm!(
+            "ecall",
+            inlateout("a0") suspend_type => ret,
+            in("a1") resume_addr ,in("a2") 0,
+            in("a6") FUNCTION_HSM_HART_SUSPEND, in("a7") EXTENSION_HSM,
+        )
+    }
+    ret
 }

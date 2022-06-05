@@ -54,25 +54,33 @@ lazy_static! {
         unsafe { UPIntrFreeCell::new(false) };
 }
 
+extern "C" fn wait_core(hart_id: usize) {
+    println!("core {} start", hart_id);
+    loop {}
+}
+
 #[no_mangle]
 pub fn rust_main() -> ! {
     let hart_id = get_hart_id();
-    println!("hart id {}", hart_id);
-    if hart_id == 0 {
-        clear_bss();
-        mm::init();
-        trap::init();
-        trap::enable_timer_interrupt();
-        timer::set_next_trigger();
-        board::device_init();
-        fs_fat::list_apps();
-        task::add_initproc();
-        *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
-        println!("start run tasks");
-        task::run_tasks();
-        panic!("Unreachable in rust_main!");
-    } else {
+    //println!("hart id {}", hart_id);
+    if hart_id != 0 {
+        sbi::hart_suspend(0x0, wait_core as usize);
         println!("hello from hart {}", hart_id);
-        panic!("do nothing ")
+        loop {}
+    } else {
+        println!("main hart start");
+        loop {}
     }
+    //clear_bss();
+    //mm::init();
+    //trap::init();
+    //trap::enable_timer_interrupt();
+    //timer::set_next_trigger();
+    //board::device_init();
+    //fs_fat::list_apps();
+    //task::add_initproc();
+    //*DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+    //println!("start run tasks");
+    //task::run_tasks();
+    //panic!("Unreachable in rust_main!");
 }
