@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use crate::config::CLOCK_FREQ;
 use crate::fs_fat::{FileType, open_file, OpenFlags};
 use crate::mm::{align_up, translated_ref, translated_refmut, translated_str};
+use crate::syscall::thread::sys_gettid;
 use crate::task::{
     add_task, CloneFlag, current_process, current_task, current_user_token,
     exit_current_and_run_next, pid2process, SignalFlags, suspend_current_and_run_next,
@@ -81,19 +82,23 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     let pcb = current_process();
     let flags = unsafe { CloneFlag::from_bits_unchecked(flags) };
     let child_pcb = pcb.fork();
+    let mut child_inner = child_pcb.inner_exclusive_access();
     let child_pid = child_pcb.getpid();
     
     if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         return -1;
     }
-    if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) {}
-    if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {}
+    if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) {
+        child_inner.tid_attr.clear_child_tid = ctid;
+    }
+    if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
+        child_inner.tid_attr.set_child_tid = ctid;
+    }
     
-    let child_inner = child_pcb.inner_exclusive_access();
     let child_task = child_inner.tasks[0].as_ref().unwrap();
     let child_trap_cx = child_task.inner.exclusive_access().get_trap_cx();
     
-    //更改
+    //更改用户栈
     if stack_ptr != 0 {
         child_trap_cx.x[2] = stack_ptr;
     }
@@ -239,4 +244,21 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     } else {
         -1
     }
+}
+
+//that's only root user
+pub fn sys_get_uid() -> isize {
+    0
+}
+
+pub fn sys_get_euid() -> isize {
+    0
+}
+
+pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
+    current_process()
+        .inner_exclusive_access()
+        .tid_attr
+        .clear_child_tid = tid_ptr;
+    sys_gettid()
 }

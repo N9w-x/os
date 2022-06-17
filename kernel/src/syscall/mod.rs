@@ -4,6 +4,10 @@ use sync::*;
 use thread::*;
 use utils::*;
 
+const SYSCALL_LINK_AT: usize = 37;
+const SYSCALL_UNLINK_AT: usize = 35;
+const SYSCALL_CLONE: usize = 220;
+const SYSCALL_EXEC: usize = 221;
 const SYSCALL_MUNMAP: usize = 215;
 const SYSCALL_MMAP: usize = 222;
 const SYSCALL_SLEEP: usize = 101;
@@ -49,20 +53,10 @@ const SYSCALL_CONDVAR_SIGNAL: usize = 1031;
 const SYSCALL_CONDVAR_WAIT: usize = 1032;
 
 // unimplemented
-
-//file system
-const SYSCALL_LINK_AT: usize = 37;
-const SYSCALL_UNLINK_AT: usize = 35;
-
-//process
-
-//mem
-
-//utils
-
-// 待修改
-const SYSCALL_CLONE: usize = 220;
-const SYSCALL_EXEC: usize = 221;
+// first to support
+const SYSCALL_MPROTECT: usize = 226;
+const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_GET_UID: usize = 174;
 
 mod fs;
 mod process;
@@ -124,6 +118,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2], args[3], args[4], args[5]),
         SYSCALL_TIMES => sys_get_times(args[0] as *mut u64),
         SYSCALL_UNAME => sys_uname(args[0] as *mut u8),
+        SYSCALL_MPROTECT => unimplemented!(),
+        SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
+        SYSCALL_GET_UID => sys_get_uid(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
