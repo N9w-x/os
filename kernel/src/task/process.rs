@@ -24,6 +24,11 @@ pub struct ProcessControlBlock {
     inner: UPIntrFreeCell<ProcessControlBlockInner>,
 }
 
+pub struct PCBAttribute {
+    pub set_child_tid: usize,
+    pub clear_child_tid: usize,
+}
+
 pub struct ProcessControlBlockInner {
     pub is_zombie: bool,
     pub memory_set: MemorySet,
@@ -39,6 +44,8 @@ pub struct ProcessControlBlockInner {
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
     //工作目录
     pub work_path: WorkPath,
+    //tid attribute
+    pub tid_attr: PCBAttribute,
     // user_heap
     pub heap_base: VirtAddr,
     pub heap_end: VirtAddr,
@@ -75,11 +82,11 @@ impl ProcessControlBlockInner {
     pub fn dealloc_tid(&mut self, tid: usize) {
         self.task_res_allocator.dealloc(tid)
     }
-    
+
     pub fn thread_count(&self) -> usize {
         self.tasks.len()
     }
-    
+
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
@@ -145,6 +152,10 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: WorkPath::new(),
+                    tid_attr: PCBAttribute {
+                        set_child_tid: 0,
+                        clear_child_tid: 0,
+                    },
                     heap_base: uheap_base.into(),
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
@@ -277,6 +288,10 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: path,
+                    tid_attr: PCBAttribute {
+                        set_child_tid: 0,
+                        clear_child_tid: 0,
+                    },
                     heap_base: parent.heap_base,
                     heap_end: parent.heap_end,
                     mmap_area_base: parent.mmap_area_base,

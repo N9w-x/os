@@ -3,8 +3,8 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::iter::FromIterator;
 
-use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use fat32::DIRENT_SZ;
+use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 
 use crate::fs_fat::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, Kstat, make_pipe, open_file,
@@ -255,7 +255,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             total_read += dirent_size;
         }
     }
-    
+
     if total_read == dir_inode.get_size() {
         0
     } else {
@@ -337,4 +337,48 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
         }
     }
     0
+}
+
+// todo 基本上所有的文件相关的系统调用都是一个样式,有时间的话之后抽象一下吧
+// 假如真的有时间的话
+pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -> isize {
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    let pcb = current_process();
+    let mut user_buf = UserBuffer::new(translated_byte_buffer(
+        token,
+        buf,
+        core::mem::size_of::<Kstat>(),
+    ));
+    
+    return match if WorkPath::is_abs_path(&path) {
+        open_file("/", &path, OpenFlags::RDONLY, FileType::Regular)
+    } else if fd == AT_FD_CWD {
+        let work_path = pcb.inner_exclusive_access().work_path.to_string();
+        open_file(&work_path, &path, OpenFlags::RDONLY, FileType::Regular)
+    } else {
+        let inner = pcb.inner_exclusive_access();
+        let fd_usize = fd as usize;
+        if fd_usize >= inner.fd_table.len() {
+            return -1;
+        }
+        
+        match &inner.fd_table[fd_usize] {
+            Some(FileDescriptor::Regular(os_inode)) => {
+                let mut kstat = Kstat::default();
+                os_inode.get_fstat(&mut kstat);
+                user_buf.write(kstat.as_bytes());
+                return 0;
+            }
+            _ => return -1,
+        }
+    } {
+        Some(os_inode) => {
+            let mut kstat = Kstat::default();
+            os_inode.get_fstat(&mut kstat);
+            user_buf.write(kstat.as_bytes());
+            0
+        }
+        None => -1,
+    };
 }

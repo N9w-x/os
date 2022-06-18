@@ -52,11 +52,14 @@ const SYSCALL_CONDVAR_CREATE: usize = 1030;
 const SYSCALL_CONDVAR_SIGNAL: usize = 1031;
 const SYSCALL_CONDVAR_WAIT: usize = 1032;
 
-// unimplemented
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
 const SYSCALL_GET_UID: usize = 174;
+
+const SYSCALL_NEW_FSTATAT: usize = 79;
+const SYSCALL_SIG_ACTION: usize = 134;
+const SYSCALL_SIG_PROC_MASK: usize = 135;
 
 mod fs;
 mod process;
@@ -121,6 +124,12 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_MPROTECT => unimplemented!(),
         SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
         SYSCALL_GET_UID => sys_get_uid(),
+        SYSCALL_NEW_FSTATAT => sys_new_fstatat(
+            args[0] as isize,
+            args[1] as *const u8,
+            args[2] as *mut u8,
+            args[3] as isize,
+        ),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
