@@ -20,9 +20,9 @@ K210_BOOTLOADER_SIZE := 131072
 RUN_MODE ?= shell
 #
 ifeq ($(RUN_MODE) , shell)
-	SHELL_PATH := ../sdcard_file/usershells
-else ifeq ($(RUN_MODE) , autotest)
 	SHELL_PATH := ../sdcard_file/user_shell
+else ifeq ($(RUN_MODE) , autotest)
+	SHELL_PATH := ../sdcard_file/autoshell
 endif
 
 # Building mode argument

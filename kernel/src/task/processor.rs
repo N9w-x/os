@@ -33,13 +33,13 @@ impl Processor {
 }
 
 lazy_static! {
-    pub static ref PROCESSOR: spin::RwLock<Processor> =
-        unsafe { spin::RwLock::new(Processor::new()) };
+    pub static ref PROCESSOR: UPIntrFreeCell<Processor> =
+        unsafe { UPIntrFreeCell::new(Processor::new()) };
 }
 
 pub fn run_tasks() {
     loop {
-        let mut processor = PROCESSOR.write();
+        let mut processor = PROCESSOR.exclusive_access();
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
@@ -60,11 +60,11 @@ pub fn run_tasks() {
 }
 
 pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
-    PROCESSOR.write().take_current()
+    PROCESSOR.exclusive_access().take_current()
 }
 
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
-    PROCESSOR.read().current()
+    PROCESSOR.exclusive_access().current()
 }
 
 pub fn current_process() -> Arc<ProcessControlBlock> {
@@ -98,7 +98,7 @@ pub fn current_kstack_top() -> usize {
 }
 
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
-    let idle_task_cx_ptr = PROCESSOR.write().get_idle_task_cx_ptr();
+    let idle_task_cx_ptr = PROCESSOR.exclusive_access().get_idle_task_cx_ptr();
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }

@@ -1,16 +1,19 @@
-use super::{frame_alloc, FrameTracker, UserBuffer, translated_byte_buffer};
-use super::{PTEFlags, PageTable, PageTableEntry};
-use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
-use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE};
-use crate::fs_fat::{FileDescriptor, File};
-use crate::sync::UPIntrFreeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::arch::asm;
+
 use lazy_static::*;
 use riscv::register::satp;
+
+use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE};
+use crate::fs_fat::{File, FileDescriptor};
+use crate::sync::UPIntrFreeCell;
+
+use super::{frame_alloc, FrameTracker, translated_byte_buffer, UserBuffer};
+use super::{PageTable, PageTableEntry, PTEFlags};
+use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
+use super::{StepByOne, VPNRange};
 
 extern "C" {
     fn stext();
@@ -37,8 +40,9 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
-    heap: BTreeMap<VirtPageNum, FrameTracker>,  // user heap
-    mmap_areas: Vec<MemoryMapArea>,             // 
+    heap: BTreeMap<VirtPageNum, FrameTracker>,
+    // user heap
+    mmap_areas: Vec<MemoryMapArea>,             //
 }
 
 impl MemorySet {

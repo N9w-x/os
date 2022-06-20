@@ -1,3 +1,4 @@
+use alloc::format;
 use core::fmt::{self, Write};
 
 use crate::drivers::chardev::CharDevice;
@@ -41,3 +42,14 @@ macro_rules! dbg {
         }
     }
 }
+
+#[macro_export]
+macro_rules! color {
+    ($template:expr,$color:expr) => {
+        format!("\x1b[{}m{}\x1b[0m", $color, $template)
+    };
+}
+
+pub const WARNING: usize = 33;
+pub const INFO: usize = 32;
+pub const ERROR: usize = 31;

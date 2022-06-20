@@ -1,5 +1,9 @@
-use crate::config::KERNEL_HEAP_SIZE;
+use alloc::format;
+
 use buddy_system_allocator::LockedHeap;
+
+use crate::config::KERNEL_HEAP_SIZE;
+use crate::console::INFO;
 
 #[global_allocator]
 static HEAP_ALLOCATOR: LockedHeap = LockedHeap::empty();
@@ -17,6 +21,13 @@ pub fn init_heap() {
             .lock()
             .init(HEAP_SPACE.as_ptr() as usize, KERNEL_HEAP_SIZE);
     }
+}
+
+pub fn get_rest() -> isize {
+    let rest = KERNEL_HEAP_SIZE - HEAP_ALLOCATOR.lock().stats_alloc_actual();
+    let str = color!(format!("There are {:#x} bytes rest in heap", rest), INFO);
+    println!("{}", str);
+    1
 }
 
 #[allow(unused)]

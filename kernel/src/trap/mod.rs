@@ -73,7 +73,7 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-    
+
             enable_supervisor_interrupt();
     
             // get system call return value
@@ -85,14 +85,14 @@ pub fn trap_handler() -> ! {
             cx = current_trap_cx();
             cx.x[10] = result as usize;
         }
-        Trap::Exception(Exception::InstructionFault) | 
-        Trap::Exception(Exception::InstructionPageFault) => {
+        Trap::Exception(Exception::InstructionFault)
+        | Trap::Exception(Exception::InstructionPageFault) => {
             current_add_signal(SignalFlags::SIGSEGV);
         }
-        Trap::Exception(Exception::StoreFault) | 
-        Trap::Exception(Exception::StorePageFault) | 
-        Trap::Exception(Exception::LoadFault) | 
-        Trap::Exception(Exception::LoadPageFault) => {
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault)
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
             if !lazy_check(stval) {
                 println!(
                     "[kernel] {:?} in application, bad addr = {:#x}.",
@@ -149,7 +149,7 @@ pub fn trap_return() -> ! {
             in("a0") trap_cx_user_va,
             in("a1") user_satp,
             options(noreturn)
-        );
+        )
     }
 }
 
@@ -175,4 +175,3 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
         }
     }
 }
-

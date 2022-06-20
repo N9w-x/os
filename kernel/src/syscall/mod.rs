@@ -61,6 +61,9 @@ const SYSCALL_NEW_FSTATAT: usize = 79;
 const SYSCALL_SIG_ACTION: usize = 134;
 const SYSCALL_SIG_PROC_MASK: usize = 135;
 
+// not standard sys call
+const SYSCALL_HEAP_SPACE: usize = 550;
+
 mod fs;
 mod process;
 mod sync;
@@ -130,6 +133,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[2] as *mut u8,
             args[3] as isize,
         ),
+        SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
