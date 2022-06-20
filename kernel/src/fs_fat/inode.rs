@@ -36,7 +36,9 @@ impl OSInode {
     pub fn read_all(&self) -> Vec<u8> {
         let mut inner = self.inner.lock();
         let mut buf = [0u8; BLOCK_SZ];
-        let mut vec = Vec::new();
+        //通过预分配内存空间减少拷贝次数
+        let file_size = inner.inode.get_size();
+        let mut vec = Vec::with_capacity(file_size as usize);
 
         loop {
             //分块读取文件内容
