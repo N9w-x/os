@@ -181,8 +181,7 @@ impl MemorySet {
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
-        let magic = elf_header.pt1.magic;
-        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "invalid elf!");
+        
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
         for i in 0..ph_count {
@@ -252,16 +251,16 @@ impl MemorySet {
         //*self = Self::new_bare();
         self.areas.clear();
     }
-
+    
     pub fn insert_mmap_area(&mut self, mmap_area: MemoryMapArea) {
         self.mmap_areas.push(mmap_area);
     }
-
+    
     pub fn remove_mmap_area(&mut self, start_vpn: VirtPageNum) -> bool {
         if let Some((idx, area)) = self.mmap_areas
-            .iter_mut()
-            .enumerate()
-            .find(|(_, area)| area.vpn_range.get_start() == start_vpn) {
+                                       .iter_mut()
+                                       .enumerate()
+                                       .find(|(_, area)| area.vpn_range.get_start() == start_vpn) {
             area.unmap(&mut self.page_table);
             self.mmap_areas.remove(idx);
             true
@@ -269,7 +268,7 @@ impl MemorySet {
             false
         }
     }
-
+    
     pub fn lazy_alloc_heap(&mut self, va: VirtAddr) -> bool {
         let vpn: VirtPageNum = va.floor();
         let frame = frame_alloc().unwrap();
@@ -278,13 +277,13 @@ impl MemorySet {
         self.heap.insert(vpn, frame);
         true
     }
-
+    
     pub fn lazy_alloc_mmap_area(&mut self, va: VirtAddr, fd_table: Vec<Option<FileDescriptor>>) -> bool {
         let vpn: VirtPageNum = va.floor();
         if let Some(area) = self.mmap_areas
-            .iter_mut()
-            .find(|area| area.vpn_range.contain(vpn)) {
-            return area.map_one(&mut self.page_table, vpn, fd_table)
+                                .iter_mut()
+                                .find(|area| area.vpn_range.contain(vpn)) {
+            return area.map_one(&mut self.page_table, vpn, fd_table);
         }
         false
     }
@@ -444,7 +443,7 @@ impl MemoryMapArea {
             flags,
         }
     }
-
+    
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum, fd_table: Vec<Option<FileDescriptor>>) -> bool {
         // 分配物理页
         let ppn: PhysPageNum;
@@ -453,7 +452,7 @@ impl MemoryMapArea {
         self.data_frames.insert(vpn, frame);
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
-
+        
         // 复制文件数据到内存
         if let Some(file_descriptor) = &fd_table[self.fd] {
             match file_descriptor {
