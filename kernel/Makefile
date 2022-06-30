@@ -87,6 +87,7 @@ img-lite:
 	@mkfs.vfat -n "test" -F 32 -C fat32.img 40960
 	@sudo mount -o loop -t vfat fat32.img mnt
 	@sudo cp -r  ../final-file/* ./mnt
+	@#sudo cp -r  ../sdcard_file/* ./mnt
 	@sudo umount ./mnt
 
 $(APPS):

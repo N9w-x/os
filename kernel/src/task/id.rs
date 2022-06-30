@@ -1,12 +1,15 @@
-use super::ProcessControlBlock;
-use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
-use crate::mm::{MapPermission, PhysPageNum, VirtAddr, KERNEL_SPACE};
-use crate::sync::UPIntrFreeCell;
 use alloc::{
     sync::{Arc, Weak},
     vec::Vec,
 };
+
 use lazy_static::*;
+
+use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
+use crate::mm::{KERNEL_SPACE, MapPermission, PhysPageNum, VirtAddr};
+use crate::sync::UPIntrFreeCell;
+
+use super::ProcessControlBlock;
 
 pub struct RecycleAllocator {
     current: usize,

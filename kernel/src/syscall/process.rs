@@ -1,8 +1,10 @@
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::config::CLOCK_FREQ;
+use crate::console::INFO;
 use crate::fs_fat::{FileType, open_file, OpenFlags};
 use crate::mm::{align_up, translated_ref, translated_refmut, translated_str};
 use crate::syscall::thread::sys_gettid;
@@ -45,7 +47,7 @@ pub fn sys_get_times(tms: *mut u64) -> isize {
     *translated_refmut(token, unsafe { tms.add(1) }) = usec;
     *translated_refmut(token, unsafe { tms.add(2) }) = usec;
     *translated_refmut(token, unsafe { tms.add(3) }) = usec;
-
+    
     usec as isize
 }
 
@@ -120,7 +122,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-
+    
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
@@ -149,7 +151,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     loop {
         let process = current_process();
         // find a child process
-
+    
         let mut inner = process.inner_exclusive_access();
         if !inner
             .children

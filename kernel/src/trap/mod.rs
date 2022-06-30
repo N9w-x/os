@@ -10,11 +10,9 @@ pub use context::TrapContext;
 pub use lazy::lazy_check;
 
 use crate::config::TRAMPOLINE;
+use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
 use crate::syscall::syscall;
-use crate::task::{
-    check_signals_of_current, current_add_signal, current_trap_cx, current_trap_cx_user_va,
-    current_user_token, exit_current_and_run_next, SignalFlags, suspend_current_and_run_next,
-};
+use crate::task::{check_signals_of_current, current_add_signal, current_process, current_trap_cx, current_trap_cx_user_va, current_user_token, exit_current_and_run_next, SignalFlags, suspend_current_and_run_next};
 use crate::timer::{check_timer, set_next_trigger};
 
 mod context;
@@ -73,7 +71,7 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-
+    
             enable_supervisor_interrupt();
     
             // get system call return value
@@ -87,19 +85,44 @@ pub fn trap_handler() -> ! {
         }
         Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault) => {
+            println!(
+                "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
+                scause.cause(),
+                stval,
+                current_trap_cx().sepc
+            );
             current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
+            let cause = scause.cause();
+            if cause == Trap::Exception(Exception::LoadPageFault) {
+                let pcb = current_process();
+                let inner = pcb.inner_exclusive_access();
+                inner.memory_set.print_map_area();
+            }
+            //let cause = scause.cause();
+            //if cause == Trap::Exception(Exception::LoadPageFault) {
+            //    let pcb = current_process();
+            //    let mut inner = pcb.inner_exclusive_access();
+            //    let start = VirtAddr::from(stval);
+            //
+            //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
+            //}
             if !lazy_check(stval) {
                 println!(
-                    "[kernel] {:?} in application, bad addr = {:#x}.",
+                    "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
                     scause.cause(),
                     stval,
+                    current_trap_cx().sepc
                 );
                 current_add_signal(SignalFlags::SIGSEGV);
+            }
+            unsafe {
+                asm!("sfence.vma");
+                asm!("fence.i" );
             }
         }
         Trap::Exception(Exception::IllegalInstruction) => {
@@ -143,12 +166,12 @@ pub fn trap_return() -> ! {
     //println!("before return");
     unsafe {
         asm!(
-            "fence.i",
-            "jr {restore_va}",
-            restore_va = in(reg) restore_va,
-            in("a0") trap_cx_user_va,
-            in("a1") user_satp,
-            options(noreturn)
+        "fence.i",
+        "jr {restore_va}",
+        restore_va = in(reg) restore_va,
+        in("a0") trap_cx_user_va,
+        in("a1") user_satp,
+        options(noreturn)
         )
     }
 }

@@ -1,12 +1,15 @@
+use alloc::format;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::config::MEMORY_MAP_BASE;
+use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE};
+use crate::console::INFO;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
 use crate::mm::{
-    KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_refmut, VirtAddr, VirtPageNum,
+    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
+    translated_refmut, VirtAddr, VirtPageNum,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
@@ -52,6 +55,7 @@ pub struct ProcessControlBlockInner {
     pub mmap_area_base: VirtAddr,
     pub mmap_area_end: VirtAddr,
 }
+
 impl ProcessControlBlockInner {
     #[allow(unused)]
     pub fn get_user_token(&self) -> usize {
@@ -90,7 +94,7 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
-    
+
     pub fn mmap(
         &mut self,
         start: usize,
@@ -104,7 +108,7 @@ impl ProcessControlBlockInner {
         let end_va = (start + len).into();
         // 测例prot定义与MapPermission正好差一位
         let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
-        
+    
         self.memory_set.insert_mmap_area(MemoryMapArea::new(
             start_va, end_va, map_perm, fd, offset, flags,
         ));
@@ -125,7 +129,7 @@ impl ProcessControlBlock {
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point, _) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -195,17 +199,42 @@ impl ProcessControlBlock {
     /// Only support processes with a single thread.
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
-        // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        // memory_set with elf program headers/trampoline/trap context/user stack/auxv
+        let (memory_set, uheap_base, ustack_base, entry_point, mut auxv) =
+            MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
+        //println!("heap base {:#x}", uheap_base);
+        //println!("stack base {:#x}", ustack_base);
+        //println!("entry pointer {:#x}", entry_point);
+        //println!("args: {:#?}", args);
+        /////////// envp [] /////////////////
+        let envs = vec![
+            String::from("SHELL=/user_shell"),
+            String::from("PWD=/"),
+            String::from("USER=root"),
+            String::from("MOTD_SHOWN=pam"),
+            String::from("LANG=C.UTF-8"),
+            String::from("INVOCATION_ID=e9500a871cf044d9886a157f53826684"),
+            String::from("TERM=vt220"),
+            String::from("SHLVL=2"),
+            String::from("JOURNAL_STREAM=8:9265"),
+            String::from("OLDPWD=/root"),
+            String::from("_=busybox"),
+            String::from("LOGNAME=root"),
+            String::from("HOME=/"),
+            String::from("PATH=/"),
+        ];
+    
         // substitute memory_set
-        self.inner_exclusive_access().memory_set = memory_set;
+        let mut inner = self.inner_exclusive_access();
+        inner.memory_set = memory_set;
         // 重新设置堆大小
-        self.inner.exclusive_access().heap_base = uheap_base.into();
-        self.inner.exclusive_access().heap_end = uheap_base.into();
+        inner.heap_base = uheap_base.into();
+        inner.heap_end = uheap_base.into();
         // 重新设置mmap_area
-        self.inner.exclusive_access().mmap_area_base = MEMORY_MAP_BASE.into();
-        self.inner.exclusive_access().mmap_area_end = MEMORY_MAP_BASE.into();
+        inner.mmap_area_base = MEMORY_MAP_BASE.into();
+        inner.mmap_area_end = MEMORY_MAP_BASE.into();
+        drop(inner);
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
@@ -214,30 +243,114 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         // push arguments on user stack
+    
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-        user_sp -= (args.len() + 1) * core::mem::size_of::<usize>();
-        let argv_base = user_sp;
-        let mut argv: Vec<_> = (0..=args.len())
-            .map(|arg| {
-                translated_refmut(
-                    new_token,
-                    (argv_base + arg * core::mem::size_of::<usize>()) as *mut usize,
-                )
-            })
-            .collect();
-        *argv[args.len()] = 0;
-        for i in 0..args.len() {
-            user_sp -= args[i].len() + 1;
-            *argv[i] = user_sp;
-            let mut p = user_sp;
-            for c in args[i].as_bytes() {
-                *translated_refmut(new_token, p as *mut u8) = *c;
-                p += 1;
+    
+        //stack top
+        //argc
+        //*argv[] with null as end
+        //*envp[] with null as end
+        //aux[] with null as end
+        //padding (16 bytes align)
+        //rand bytes
+        //string: platform
+        //argv[]
+        //envp[]
+        //stack bottom
+    
+        let push_stack = |parms: Vec<String>, user_sp: &mut usize| {
+            //record parm ptr
+            let mut ptr_vec: Vec<usize> = (0..=parms.len()).collect();
+        
+            //end with null
+            ptr_vec[parms.len()] = 0;
+        
+            for index in 0..parms.len() {
+                *user_sp -= parms[index].len() + 1;
+                ptr_vec[index] = *user_sp;
+                let mut p = *user_sp;
+            
+                //write chars to [user_sp,user_sp + len]
+                for c in parms[index].as_bytes() {
+                    *translated_refmut(new_token, p as *mut u8) = *c;
+                    p += 1;
+                }
+                *translated_refmut(new_token, p as *mut u8) = 0;
             }
-            *translated_refmut(new_token, p as *mut u8) = 0;
-        }
+            ptr_vec
+        };
+    
+        //////////////////////// envp[] ////////////////////////////////
+        let envp = push_stack(envs, &mut user_sp);
+        // make sure aligned to 8b for k210
+        user_sp -= user_sp % core::mem::size_of::<usize>();
+    
+        ///////////////////// argv[] /////////////////////////////////
+        let argc = args.len();
+        let argv = push_stack(args, &mut user_sp);
         // make the user_sp aligned to 8B for k210 platform
         user_sp -= user_sp % core::mem::size_of::<usize>();
+    
+        ///////////////////// platform ///////////////////////////////
+        let platform = "RISC-V64";
+        user_sp -= platform.len() + 1;
+        user_sp -= user_sp % core::mem::size_of::<usize>();
+        let mut p = user_sp;
+        for &c in platform.as_bytes() {
+            *translated_refmut(new_token, p as *mut u8) = c;
+            p += 1;
+        }
+        *translated_refmut(new_token, p as *mut u8) = 0;
+    
+        ///////////////////// rand bytes ////////////////////////////
+        user_sp -= 16;
+        auxv.push(AuxHeader::new(AT_RANDOM, user_sp));
+        *translated_refmut(new_token, user_sp as *mut usize) = 0x01020304050607;
+        *translated_refmut(
+            new_token,
+            (user_sp + core::mem::size_of::<usize>()) as *mut usize,
+        ) = 0x08090a0b0c0d0e0f;
+    
+        ///////////////////// padding ////////////////////////////////
+        user_sp -= user_sp % 16;
+    
+        ///////////////////// auxv[] //////////////////////////////////
+        auxv.push(AuxHeader::new(AT_EXECFN, argv[0]));
+        auxv.push(AuxHeader::new(AT_NULL, 0));
+        user_sp -= auxv.len() * core::mem::size_of::<AuxHeader>();
+        let aux_base = user_sp;
+        let mut addr = aux_base;
+        for aux_header in auxv {
+            *translated_refmut(new_token, addr as *mut usize) = aux_header._type;
+            *translated_refmut(
+                new_token,
+                (addr + core::mem::size_of::<usize>()) as *mut usize,
+            ) = aux_header.value;
+            addr += core::mem::size_of::<AuxHeader>();
+        }
+    
+        ///////////////////// *envp[] /////////////////////////////////
+        user_sp -= envp.len() * core::mem::size_of::<usize>();
+        let envp_base = user_sp;
+        let mut ustack_ptr = envp_base;
+        for env_ptr in envp {
+            *translated_refmut(new_token, ustack_ptr as *mut usize) = env_ptr;
+            ustack_ptr += core::mem::size_of::<usize>();
+        }
+    
+        ///////////////////// *argv[] ////////////////////////////////
+        user_sp -= argv.len() * core::mem::size_of::<usize>();
+        let argv_base = user_sp;
+        let mut ustack_ptr = argv_base;
+        for argv_ptr in argv {
+            *translated_refmut(new_token, ustack_ptr as *mut usize) = argv_ptr;
+            ustack_ptr += core::mem::size_of::<usize>();
+        }
+    
+        ///////////////////// argc ///////////////////////////////////
+        user_sp -= core::mem::size_of::<usize>();
+        *translated_refmut(new_token, user_sp as *mut usize) = argc;
+    
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -246,8 +359,11 @@ impl ProcessControlBlock {
             task.kstack.get_top(),
             trap_handler as usize,
         );
-        trap_cx.x[10] = args.len();
-        trap_cx.x[11] = argv_base;
+    
+        trap_cx.x[10] = argc; //argc
+        trap_cx.x[11] = argv_base; //argv
+        trap_cx.x[12] = envp_base; //envp
+        trap_cx.x[13] = aux_base; //auxv
         *task_inner.get_trap_cx() = trap_cx;
     }
 
