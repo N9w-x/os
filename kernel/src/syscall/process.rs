@@ -5,12 +5,12 @@ use alloc::vec::Vec;
 
 use crate::config::CLOCK_FREQ;
 use crate::console::INFO;
-use crate::fs_fat::{FileType, open_file, OpenFlags};
+use crate::fs_fat::{open_file, FileType, OpenFlags};
 use crate::mm::{align_up, translated_ref, translated_refmut, translated_str};
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, CloneFlag, current_process, current_task, current_user_token,
-    exit_current_and_run_next, pid2process, SignalFlags, suspend_current_and_run_next,
+    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
+    pid2process, suspend_current_and_run_next, CloneFlag, SigAction, Signum,
 };
 use crate::timer::{get_time, get_time_ms, get_time_us, USEC_PER_SEC};
 use crate::trap::lazy_check;
@@ -47,7 +47,7 @@ pub fn sys_get_times(tms: *mut u64) -> isize {
     *translated_refmut(token, unsafe { tms.add(1) }) = usec;
     *translated_refmut(token, unsafe { tms.add(2) }) = usec;
     *translated_refmut(token, unsafe { tms.add(3) }) = usec;
-    
+
     usec as isize
 }
 
@@ -86,7 +86,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     let child_pcb = pcb.fork();
     let mut child_inner = child_pcb.inner_exclusive_access();
     let child_pid = child_pcb.getpid();
-    
+
     if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         return -1;
     }
@@ -96,10 +96,10 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
         child_inner.tid_attr.set_child_tid = ctid;
     }
-    
+
     let child_task = child_inner.tasks[0].as_ref().unwrap();
     let child_trap_cx = child_task.inner.exclusive_access().get_trap_cx();
-    
+
     //更改用户栈
     if stack_ptr != 0 {
         child_trap_cx.x[2] = stack_ptr;
@@ -122,7 +122,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    
+
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
@@ -151,7 +151,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     loop {
         let process = current_process();
         // find a child process
-    
+
         let mut inner = process.inner_exclusive_access();
         if !inner
             .children
@@ -190,7 +190,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 
 pub fn sys_kill(pid: usize, signal: u32) -> isize {
     if let Some(process) = pid2process(pid) {
-        if let Some(flag) = SignalFlags::from_bits(signal) {
+        if let Some(flag) = Signum::from_bits(signal) {
             process.inner_exclusive_access().signals |= flag;
             0
         } else {
@@ -263,4 +263,44 @@ pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
         .tid_attr
         .clear_child_tid = tid_ptr;
     sys_gettid()
+}
+
+pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isize {
+    let act = act as *mut SigAction;
+    let oldact = oldact as *mut SigAction;
+
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let token = current_user_token();
+
+    let s = Signum::from_bits(1 << (signum - 1)).unwrap();
+    if [Signum::SIGKILL, Signum::SIGSTOP].contains(&s) {
+        return -1;
+    }
+
+    // 将原来的sigaction保存到oldact地址中
+    if let Some(old_sigaction) = inner.sig.actions[signum] {
+        if oldact as usize != 0 {
+            *translated_refmut(token, oldact) = old_sigaction.clone();
+        }
+        inner.sig.actions[signum] = None;
+    } else if oldact as usize != 0 {
+        *translated_refmut(token, oldact) = SigAction::default();
+    }
+
+    // 保存新的sigaction
+    if act as usize == 0 {
+        return 0;
+    }
+    let sigaction = translated_refmut(token, act).clone();
+    inner.sig.actions[signum] = Some(sigaction);
+
+    0
+}
+
+pub fn sys_sigreturn() -> ! {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+
+    todo!()
 }

@@ -3,6 +3,7 @@
 #![allow(unused)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#![feature(bool_to_option)]
 
 extern crate alloc;
 #[macro_use]
@@ -63,15 +64,15 @@ extern "C" fn wait_core(hart_id: usize) {
 #[no_mangle]
 pub fn rust_main() -> ! {
     /*    let hart_id = get_hart_id();
-        /println!("hart id {}", hart_id);
-        if hart_id != 0 {
-            sbi::hart_suspend(0x0, wait_core as usize);
-            println!("hello from hart {}", hart_id);
-            loop {}
-        } else {
-            println!("main hart start");
-            loop {}
-        }*/
+    /println!("hart id {}", hart_id);
+    if hart_id != 0 {
+        sbi::hart_suspend(0x0, wait_core as usize);
+        println!("hello from hart {}", hart_id);
+        loop {}
+    } else {
+        println!("main hart start");
+        loop {}
+    }*/
     clear_bss();
     mm::init();
     trap::init();
