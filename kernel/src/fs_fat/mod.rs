@@ -9,6 +9,7 @@ pub use file_descriptor::FileDescriptor;
 pub use fs_info::{Dirent, Kstat};
 pub use inode::{ch_dir, list_apps, open_file};
 pub use inode::{FileType, OpenFlags, OSInode};
+pub use io_vec::IOVec;
 pub use path::WorkPath;
 pub use pipe::{make_pipe, Pipe};
 pub use stdio::{Stdin, Stdout};
@@ -19,6 +20,7 @@ use crate::mm::UserBuffer;
 mod file_descriptor;
 mod fs_info;
 mod inode;
+mod io_vec;
 mod mount;
 mod path;
 mod pipe;
@@ -39,4 +41,3 @@ pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
         ROOT_INODE.find_vfile_bypath(path).unwrap()
     }
 }
-

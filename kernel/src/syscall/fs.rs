@@ -7,10 +7,12 @@ use fat32::DIRENT_SZ;
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 
 use crate::fs_fat::{
-    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, Kstat, make_pipe, open_file,
-    OpenFlags, OSInode, WorkPath,
+    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
+    open_file, OpenFlags, OSInode, WorkPath,
 };
-use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
+use crate::mm::{
+    translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
+};
 use crate::task::{current_process, current_task, current_user_token};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -293,7 +295,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     } else {
         let fd_usize = fd as usize;
         let inner = pcb.inner_exclusive_access();
-    
+
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
@@ -381,4 +383,52 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         }
         None => -1,
     };
+}
+
+// 因为这里不会有AT_FD_CWD这种情况,所以fd类型为usize
+pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
+    let token = current_user_token();
+    let pcb = current_process();
+    let inner = pcb.inner_exclusive_access();
+    
+    if fd >= inner.fd_table.len() || inner.fd_table[fd].is_none() {
+        return -1;
+    }
+    let mut write_size = 0;
+    if let Some(file) = &inner.fd_table[fd] {
+        if !file.writable() {
+            return -1;
+        }
+        
+        for i in 0..iov_cnt {
+            let iov_ref = translated_ref(
+                token,
+                (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec,
+            );
+            let buf = UserBuffer::new(unsafe {
+                translated_byte_buffer(token, iov_ref.base, iov_ref.len)
+            });
+            write_size += file.write(buf);
+        }
+    }
+    write_size as isize
+}
+
+pub fn sys_fs(option: usize, fs_name: usize, buf: usize) -> isize {
+    let token = current_user_token();
+    match option {
+        1 => {
+            let fs_name = translated_str(token, fs_name as *const u8);
+            1
+        }
+        2 => {
+            let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf as *mut u8, 10));
+            //fat32.len() + zero end
+            let vec_buf = r#"FAT32\0"#.as_bytes().to_vec();
+            user_buf.write(&vec_buf);
+            0
+        }
+        3 => 1,
+        _ => -1,
+    }
 }

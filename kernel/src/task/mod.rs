@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 
 pub use context::TaskContext;
-pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
+pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
 pub use info::CloneFlag;
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
@@ -17,7 +17,7 @@ use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 use crate::config::PAGE_SIZE;
-use crate::fs_fat::{open_file, File, FileType, OSInode, OpenFlags};
+use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
 use crate::mm::{add_free, UserBuffer};
 
 mod context;

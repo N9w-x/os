@@ -4,6 +4,8 @@ use sync::*;
 use thread::*;
 use utils::*;
 
+use crate::const_def;
+
 const SYSCALL_LINK_AT: usize = 37;
 const SYSCALL_UNLINK_AT: usize = 35;
 const SYSCALL_CLONE: usize = 220;
@@ -60,6 +62,10 @@ const SYSCALL_GET_UID: usize = 174;
 const SYSCALL_NEW_FSTATAT: usize = 79;
 const SYSCALL_SIG_ACTION: usize = 134;
 const SYSCALL_SIG_PROC_MASK: usize = 135;
+
+const_def!(SYSCALL_EXIT_GROUP, 94);
+const_def!(SYSCALL_WRITEV, 66);
+const_def!(SYSCALL_SYSFS, 135);
 
 // not standard sys call
 const SYSCALL_HEAP_SPACE: usize = 550;
@@ -133,7 +139,11 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[2] as *mut u8,
             args[3] as isize,
         ),
+        SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
+        SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
+        SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
+        //_ => 0,
     }
 }
