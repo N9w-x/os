@@ -42,7 +42,6 @@ const SYSCALL_BRK: usize = 214;
 
 const SYSCALL_WAITPID: usize = 260;
 const SYSCALL_THREAD_CREATE: usize = 1000;
-const SYSCALL_GETTID: usize = 1001;
 const SYSCALL_WAITTID: usize = 1002;
 const SYSCALL_MUTEX_CREATE: usize = 1010;
 const SYSCALL_MUTEX_LOCK: usize = 1011;
@@ -65,7 +64,7 @@ const SYSCALL_SIG_PROC_MASK: usize = 135;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_WRITEV, 66);
-const_def!(SYSCALL_SYSFS, 135);
+const_def!(SYSCALL_GET_TID, 178);
 
 // not standard sys call
 const SYSCALL_HEAP_SPACE: usize = 550;
@@ -97,7 +96,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
         SYSCALL_THREAD_CREATE => sys_thread_create(args[0], args[1]),
-        SYSCALL_GETTID => sys_gettid(),
+        SYSCALL_GET_TID => sys_gettid(),
         SYSCALL_WAITTID => sys_waittid(args[0]) as isize,
         SYSCALL_MUTEX_CREATE => sys_mutex_create(args[0] == 1),
         SYSCALL_MUTEX_LOCK => sys_mutex_lock(args[0]),
@@ -141,7 +140,6 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         ),
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
-        SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
         //_ => 0,
