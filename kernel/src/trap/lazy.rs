@@ -7,10 +7,10 @@ pub fn lazy_check(addr: usize) -> bool {
     let fd_table = inner.fd_table.clone();
 
     let va = addr.into();
-    let heap_base = inner.heap_base.0;
-    let heap_end = inner.heap_end.0;
-    let mmap_area_base = inner.mmap_area_base.0;
-    let mmap_area_end = inner.mmap_area_end.0;
+    let heap_base = inner.memory_set.heap_base.0;
+    let heap_end = inner.memory_set.heap_end.0;
+    let mmap_area_base = inner.memory_set.mmap_area_base.0;
+    let mmap_area_end = inner.memory_set.mmap_area_end.0;
 
     if heap_base <= addr && addr < heap_end {
         inner.memory_set.lazy_alloc_heap(va)

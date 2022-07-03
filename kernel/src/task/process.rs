@@ -4,21 +4,21 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE};
+use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE, PAGE_SIZE};
 use crate::console::INFO;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
 use crate::mm::{
-    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
-    translated_refmut, VirtAddr, VirtPageNum,
+    align_up, translated_ref, translated_refmut, AuxHeader, MapPermission, MemorySet, VirtAddr,
+    VirtPageNum, KERNEL_SPACE,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 
-use super::{add_task, SignalFlags};
-use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
+use super::{add_task, SignalFlags};
+use super::{pid_alloc, PidHandle};
 
 pub struct ProcessControlBlock {
     // immutable
@@ -49,11 +49,6 @@ pub struct ProcessControlBlockInner {
     pub work_path: WorkPath,
     //tid attribute
     pub tid_attr: PCBAttribute,
-    // user_heap
-    pub heap_base: VirtAddr,
-    pub heap_end: VirtAddr,
-    pub mmap_area_base: VirtAddr,
-    pub mmap_area_end: VirtAddr,
 }
 
 impl ProcessControlBlockInner {
@@ -108,11 +103,10 @@ impl ProcessControlBlockInner {
         let end_va = (start + len).into();
         // 测例prot定义与MapPermission正好差一位
         let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
-    
-        self.memory_set.insert_mmap_area(MemoryMapArea::new(
-            start_va, end_va, map_perm, fd, offset, flags,
-        ));
-        self.mmap_area_end = end_va;
+
+        self.memory_set
+            .insert_mmap_area(start_va, end_va, map_perm, fd, offset, flags);
+        self.memory_set.mmap_area_end = end_va;
     }
 
     pub fn munmap(&mut self, start: usize, len: usize) -> bool {
@@ -129,7 +123,7 @@ impl ProcessControlBlock {
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, uheap_base, ustack_base, entry_point, _) = MemorySet::from_elf(elf_data);
+        let (memory_set, ustack_base, entry_point, _) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -160,10 +154,6 @@ impl ProcessControlBlock {
                         set_child_tid: 0,
                         clear_child_tid: 0,
                     },
-                    heap_base: uheap_base.into(),
-                    heap_end: uheap_base.into(),
-                    mmap_area_base: MEMORY_MAP_BASE.into(),
-                    mmap_area_end: MEMORY_MAP_BASE.into(),
                 })
             },
         });
@@ -200,8 +190,7 @@ impl ProcessControlBlock {
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
         // memory_set with elf program headers/trampoline/trap context/user stack/auxv
-        let (memory_set, uheap_base, ustack_base, entry_point, mut auxv) =
-            MemorySet::from_elf(elf_data);
+        let (memory_set, ustack_base, entry_point, mut auxv) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
         //println!("heap base {:#x}", uheap_base);
         //println!("stack base {:#x}", ustack_base);
@@ -224,16 +213,10 @@ impl ProcessControlBlock {
             String::from("HOME=/"),
             String::from("PATH=/"),
         ];
-    
+
         // substitute memory_set
         let mut inner = self.inner_exclusive_access();
         inner.memory_set = memory_set;
-        // 重新设置堆大小
-        inner.heap_base = uheap_base.into();
-        inner.heap_end = uheap_base.into();
-        // 重新设置mmap_area
-        inner.mmap_area_base = MEMORY_MAP_BASE.into();
-        inner.mmap_area_end = MEMORY_MAP_BASE.into();
         drop(inner);
         // then we alloc user resource for main thread again
         // since memory_set has been changed
@@ -243,9 +226,9 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         // push arguments on user stack
-    
+
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-    
+
         //stack top
         //argc
         //*argv[] with null as end
@@ -257,19 +240,19 @@ impl ProcessControlBlock {
         //argv[]
         //envp[]
         //stack bottom
-    
+
         let push_stack = |parms: Vec<String>, user_sp: &mut usize| {
             //record parm ptr
             let mut ptr_vec: Vec<usize> = (0..=parms.len()).collect();
-        
+
             //end with null
             ptr_vec[parms.len()] = 0;
-        
+
             for index in 0..parms.len() {
                 *user_sp -= parms[index].len() + 1;
                 ptr_vec[index] = *user_sp;
                 let mut p = *user_sp;
-            
+
                 //write chars to [user_sp,user_sp + len]
                 for c in parms[index].as_bytes() {
                     *translated_refmut(new_token, p as *mut u8) = *c;
@@ -279,18 +262,18 @@ impl ProcessControlBlock {
             }
             ptr_vec
         };
-    
+
         //////////////////////// envp[] ////////////////////////////////
         let envp = push_stack(envs, &mut user_sp);
         // make sure aligned to 8b for k210
         user_sp -= user_sp % core::mem::size_of::<usize>();
-    
+
         ///////////////////// argv[] /////////////////////////////////
         let argc = args.len();
         let argv = push_stack(args, &mut user_sp);
         // make the user_sp aligned to 8B for k210 platform
         user_sp -= user_sp % core::mem::size_of::<usize>();
-    
+
         ///////////////////// platform ///////////////////////////////
         let platform = "RISC-V64";
         user_sp -= platform.len() + 1;
@@ -301,7 +284,7 @@ impl ProcessControlBlock {
             p += 1;
         }
         *translated_refmut(new_token, p as *mut u8) = 0;
-    
+
         ///////////////////// rand bytes ////////////////////////////
         user_sp -= 16;
         auxv.push(AuxHeader::new(AT_RANDOM, user_sp));
@@ -310,10 +293,10 @@ impl ProcessControlBlock {
             new_token,
             (user_sp + core::mem::size_of::<usize>()) as *mut usize,
         ) = 0x08090a0b0c0d0e0f;
-    
+
         ///////////////////// padding ////////////////////////////////
         user_sp -= user_sp % 16;
-    
+
         ///////////////////// auxv[] //////////////////////////////////
         auxv.push(AuxHeader::new(AT_EXECFN, argv[0]));
         auxv.push(AuxHeader::new(AT_NULL, 0));
@@ -328,7 +311,7 @@ impl ProcessControlBlock {
             ) = aux_header.value;
             addr += core::mem::size_of::<AuxHeader>();
         }
-    
+
         ///////////////////// *envp[] /////////////////////////////////
         user_sp -= envp.len() * core::mem::size_of::<usize>();
         let envp_base = user_sp;
@@ -337,7 +320,7 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = env_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-    
+
         ///////////////////// *argv[] ////////////////////////////////
         user_sp -= argv.len() * core::mem::size_of::<usize>();
         let argv_base = user_sp;
@@ -346,11 +329,11 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = argv_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-    
+
         ///////////////////// argc ///////////////////////////////////
         user_sp -= core::mem::size_of::<usize>();
         *translated_refmut(new_token, user_sp as *mut usize) = argc;
-    
+
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -359,7 +342,7 @@ impl ProcessControlBlock {
             task.kstack.get_top(),
             trap_handler as usize,
         );
-    
+
         trap_cx.x[10] = argc; //argc
         trap_cx.x[11] = argv_base; //argv
         trap_cx.x[12] = envp_base; //envp
@@ -408,10 +391,6 @@ impl ProcessControlBlock {
                         set_child_tid: 0,
                         clear_child_tid: 0,
                     },
-                    heap_base: parent.heap_base,
-                    heap_end: parent.heap_end,
-                    mmap_area_base: parent.mmap_area_base,
-                    mmap_area_end: parent.mmap_area_end,
                 })
             },
         });
@@ -448,5 +427,36 @@ impl ProcessControlBlock {
 
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+
+    pub fn kmmap(
+        &self,
+        start: usize,
+        len: usize,
+        fd: usize,
+        offset: usize,
+        flags: usize,
+        fd_table: Vec<Option<FileDescriptor>>,
+    ) -> usize {
+        let mut kernel_space = KERNEL_SPACE.exclusive_access();
+        let start_va: VirtAddr = kernel_space.mmap_area_end.into();
+        let end_va = VirtAddr::from(start_va.0 + len);
+        let token = kernel_space.token();
+        kernel_space.insert_kmmap_area(
+            start_va,
+            end_va,
+            MapPermission::W | MapPermission::R,
+            fd,
+            offset,
+            flags,
+            fd_table,
+        );
+        kernel_space.mmap_area_end = end_va;
+        start_va.0
+    }
+
+    pub fn kmunmap(&self, start: usize, len: usize) -> bool {
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
+        KERNEL_SPACE.exclusive_access().remove_mmap_area(start_vpn)
     }
 }

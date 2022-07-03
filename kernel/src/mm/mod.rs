@@ -3,7 +3,7 @@ use address::VPNRange;
 pub use frame_allocator::{add_free, frame_alloc, frame_dealloc, FrameTracker};
 pub use heap_allocator::get_rest;
 pub use memory_set::{AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet};
-pub use memory_set::{kernel_token, remap_test};
+pub use memory_set::{KERNEL_TOKEN, remap_test};
 pub use page_table::{
     PageTable, PageTableEntry, translated_byte_buffer, translated_ref, translated_refmut,
     translated_str, UserBuffer, UserBufferIterator,

@@ -52,6 +52,10 @@ const SYSCALL_CONDVAR_CREATE: usize = 1030;
 const SYSCALL_CONDVAR_SIGNAL: usize = 1031;
 const SYSCALL_CONDVAR_WAIT: usize = 1032;
 
+const SYSCALL_GETITIMER: usize = 102;
+const SYSCALL_SETITIMER: usize = 103;
+const SYSCALL_CLOCK_GETTIME: usize = 113;
+
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_SET_TID_ADDRESS: usize = 96;
@@ -133,6 +137,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[2] as *mut u8,
             args[3] as isize,
         ),
+        SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as *mut usize),
+        SYSCALL_SETITIMER => sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as *mut usize),
+        SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }

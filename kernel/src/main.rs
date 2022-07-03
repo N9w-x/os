@@ -3,6 +3,7 @@
 #![allow(unused)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#![feature(bool_to_option)]
 
 extern crate alloc;
 #[macro_use]
