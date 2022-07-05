@@ -1,3 +1,5 @@
+use core::mem::size_of;
+
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -5,14 +7,14 @@ use alloc::vec::Vec;
 
 use crate::config::CLOCK_FREQ;
 use crate::console::INFO;
-use crate::fs_fat::{open_file, FileType, OpenFlags};
-use crate::mm::{align_up, translated_ref, translated_refmut, translated_str};
+use crate::fs_fat::{FileType, open_file, OpenFlags};
+use crate::mm::{align_up, translated_ref, translated_refmut, translated_str, translated_byte_buffer, UserBuffer};
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
-    pid2process, suspend_current_and_run_next, CloneFlag, SigAction, Signum,
+    add_task, current_process, current_task, current_user_token, exit_current_and_run_next, 
+    pid2process, suspend_current_and_run_next, CloneFlag, Signum, SigAction, ITimerVal, ITIMER_MANAGER,
 };
-use crate::timer::{get_time, get_time_ms, get_time_us, USEC_PER_SEC};
+use crate::timer::{get_time, get_time_ms, get_time_us, USEC_PER_SEC, NSEC_PER_SEC};
 use crate::trap::lazy_check;
 
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -34,7 +36,6 @@ pub fn sys_get_time_of_day(ts: *mut u64) -> isize {
     let us = get_time_us() as u64;
     let sec = us / USEC_PER_SEC as u64;
     let usec = us % USEC_PER_SEC as u64;
-    // println!("[debug] us:{}, sec: {}, usec: {}", us, sec, usec);
     *translated_refmut(token, ts) = sec;
     *translated_refmut(token, unsafe { ts.add(1) }) = usec;
     0
@@ -303,4 +304,77 @@ pub fn sys_sigreturn() -> ! {
     let mut inner = process.inner_exclusive_access();
 
     todo!()
+}
+
+pub fn sys_getitimer(which: isize, curr_value: usize) -> isize {
+    // 决赛只需实现 which == ITIMER_REAL
+    if curr_value != 0 {
+        let token = current_user_token();
+        // 将 itimer 写入到 curr_value 指向的地址中
+        let itimer = current_process().inner_exclusive_access().itimer;
+        let mut buf = UserBuffer::new(translated_byte_buffer(
+            token,
+            curr_value as *const u8,
+            size_of::<ITimerVal>()
+        ));
+        buf.write(itimer.as_bytes());
+        0
+    } else {
+        -1
+    }
+}
+
+pub fn sys_setitimer(which: isize, new_value: *mut usize, old_value: usize) -> isize {
+    // 决赛只需实现 which == ITIMER_REAL
+    // struct itimerval {
+    //     struct timeval it_interval; /* next value */
+    //     struct timeval it_value;    /* current value */
+    // };
+    // struct timeval {
+    //     time_t      tv_sec;         /* seconds */
+    //     suseconds_t tv_usec;        /* microseconds */
+    // };
+    if new_value as usize != 0 {
+        let token = current_user_token();
+        // 将原本的itimer写入old_value
+        if old_value as usize != 0 {
+            let itimer = current_process().inner_exclusive_access().itimer;
+            let mut buf = UserBuffer::new(translated_byte_buffer(
+                token,
+                old_value as *const u8,
+                size_of::<ITimerVal>()
+            ));
+            buf.write(itimer.as_bytes());
+        }
+        // new_value写入新的itimer
+        let mut new_itimer = ITimerVal::new();
+        new_itimer.it_interval.tv_sec = *translated_refmut(token, new_value);
+        new_itimer.it_interval.tv_usec = *translated_refmut(token, unsafe {new_value.add(1)});
+        new_itimer.it_value.tv_sec = *translated_refmut(token, unsafe {new_value.add(2)});
+        new_itimer.it_value.tv_usec = *translated_refmut(token, unsafe {new_value.add(3)});
+        current_process().inner_exclusive_access().itimer = new_itimer;
+        // 插入到itimer向量中，开始计时
+        ITIMER_MANAGER.exclusive_access().insert_itimer(new_itimer, current_process().getpid());
+        0
+    } else {
+        -1
+    }
+}
+
+pub fn sys_clock_gettime(clk_id: isize, tp: *mut usize) -> isize {
+    // 当前只支持 clk_id == CLOCK_REALTIME
+    // struct timespec {
+    //     time_t   tv_sec;        /* seconds */
+    //     long     tv_nsec;       /* nanoseconds */
+    // };
+    if tp as usize != 0 {
+        let token = current_user_token();
+        let ticks = get_time();
+        *translated_refmut(token, tp) = ticks / CLOCK_FREQ;
+        *translated_refmut(token, unsafe { tp.add(1) }) =
+            ticks % CLOCK_FREQ * (NSEC_PER_SEC / CLOCK_FREQ);
+        0
+    } else {
+        -1
+    }
 }

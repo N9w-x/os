@@ -15,7 +15,7 @@ use crate::syscall::syscall;
 use crate::task::{
     check_signals_of_current, current_add_signal, current_process, current_trap_cx,
     current_trap_cx_user_va, current_user_token, exit_current_and_run_next,
-    suspend_current_and_run_next, Signum,
+    suspend_current_and_run_next, Signum, ITIMER_MANAGER
 };
 use crate::timer::{check_timer, set_next_trigger};
 
@@ -135,6 +135,7 @@ pub fn trap_handler() -> ! {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
+            ITIMER_MANAGER.exclusive_access().check_itimer();// 检查定时器
             suspend_current_and_run_next();
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
@@ -191,6 +192,7 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
+            ITIMER_MANAGER.exclusive_access().check_itimer();// 检查定时器
             // do not schedule now
         }
         _ => {

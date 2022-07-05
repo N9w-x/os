@@ -18,7 +18,7 @@ use crate::trap::{trap_handler, TrapContext};
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
-use super::{add_task, Signum};
+use super::{add_task, Signum, ITimerVal};
 use super::{pid_alloc, PidHandle};
 
 pub struct ProcessControlBlock {
@@ -56,6 +56,8 @@ pub struct ProcessControlBlockInner {
     pub heap_end: VirtAddr,
     pub mmap_area_base: VirtAddr,
     pub mmap_area_end: VirtAddr,
+    // 定时器信息
+    pub itimer: ITimerVal,
 }
 
 impl ProcessControlBlockInner {
@@ -167,6 +169,7 @@ impl ProcessControlBlock {
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
                     mmap_area_end: MEMORY_MAP_BASE.into(),
+                    itimer: ITimerVal::new(),
                 })
             },
         });
@@ -416,6 +419,7 @@ impl ProcessControlBlock {
                     heap_end: parent.heap_end,
                     mmap_area_base: parent.mmap_area_base,
                     mmap_area_end: parent.mmap_area_end,
+                    itimer: ITimerVal::new(),
                 })
             },
         });
