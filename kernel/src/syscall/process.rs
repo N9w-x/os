@@ -267,6 +267,14 @@ pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
 }
 
 pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isize {
+    if let Some(s) = Signum::from_serial(signum) {
+        if [Signum::SIGKILL, Signum::SIGSTOP].contains(&s) {
+            return -1;
+        }
+    } else {
+        return -1;
+    };
+
     let act = act as *mut SigAction;
     let oldact = oldact as *mut SigAction;
 
@@ -274,36 +282,44 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     let mut inner = process.inner_exclusive_access();
     let token = current_user_token();
 
-    let s = Signum::from_bits(1 << (signum - 1)).unwrap();
-    if [Signum::SIGKILL, Signum::SIGSTOP].contains(&s) {
-        return -1;
-    }
-
     // 将原来的sigaction保存到oldact地址中
-    if let Some(old_sigaction) = inner.sig.actions[signum] {
+    if let Some(old_sigaction) = inner.signal_actions.actions[signum] {
         if oldact as usize != 0 {
-            *translated_refmut(token, oldact) = old_sigaction.clone();
+            *translated_refmut(token, oldact) = old_sigaction;
         }
-        inner.sig.actions[signum] = None;
+        inner.signal_actions.actions[signum] = None;
     } else if oldact as usize != 0 {
         *translated_refmut(token, oldact) = SigAction::default();
     }
 
     // 保存新的sigaction
-    if act as usize == 0 {
-        return 0;
+    if act as usize != 0 {
+        let sigaction = *translated_ref(token, act);
+        inner.signal_actions.actions[signum] = Some(sigaction);
     }
-    let sigaction = translated_refmut(token, act).clone();
-    inner.sig.actions[signum] = Some(sigaction);
 
     0
 }
 
-pub fn sys_sigreturn() -> ! {
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
+pub fn sys_sigreturn() -> isize {
+    let task = current_task().unwrap();
+    let process = task.process.upgrade().unwrap();
 
-    todo!()
+    let mut process_inner = process.inner_exclusive_access();
+    let mut inner = task.inner_exclusive_access();
+
+    // 取消当前正在响应的信号
+    process_inner.signal_handling = 0;
+
+    // 将备份的trap上下文恢复
+    *inner.get_trap_cx() = process_inner.trap_ctx_backup.unwrap();
+
+    0
+}
+
+pub fn sys_sigprocmask(mask: u32) -> isize {
+    todo!();
+    1
 }
 
 pub fn sys_getitimer(which: isize, curr_value: usize) -> isize {
