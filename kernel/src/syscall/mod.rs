@@ -1,9 +1,12 @@
+use alloc::format;
+
 use fs::*;
 use process::*;
 use sync::*;
 use thread::*;
 use utils::*;
 
+use crate::console::ERROR;
 use crate::const_def;
 
 const SYSCALL_LINK_AT: usize = 37;
@@ -141,7 +144,11 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
-        _ => panic!("Unsupported syscall_id: {}", syscall_id),
-        //_ => 0,
+        //_ => panic!("Unsupported syscall_id: {}", syscall_id),
+        _ => {
+            let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
+            println!("{}", log);
+            0
+        } //_ => 0,
     }
 }

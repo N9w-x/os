@@ -7,13 +7,14 @@ use core::fmt::{Display, Formatter};
 
 use lazy_static::*;
 use riscv::register::satp;
+use xmas_elf::ElfFile;
 
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, MEMORY_END, MMIO,
     PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
 };
-use crate::fs_fat::{File, FileDescriptor};
+use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
 
 use super::{frame_alloc, FrameTracker, translated_byte_buffer, UserBuffer};
@@ -89,7 +90,7 @@ impl MemorySet {
             self.areas.remove(idx);
         }
     }
-    
+
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -97,7 +98,7 @@ impl MemorySet {
         }
         self.areas.push(map_area);
     }
-    
+
     fn push_with_offset(&mut self, mut map_area: MapArea, offset: usize, data: Option<&[u8]>) {
         map_area.map(&mut self.page_table);
         if let Some(data) = data {
@@ -105,7 +106,7 @@ impl MemorySet {
         }
         self.areas.push(map_area);
     }
-    
+
     /// Mention that trampoline is not collected by areas.
     fn map_trampoline(&mut self) {
         self.page_table.map(
@@ -204,6 +205,14 @@ impl MemorySet {
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
         
+        let mut is_dynamic = false;
+        
+        for section in elf.section_iter() {
+            if let Ok(".interp") = section.get_name(&elf) {
+                is_dynamic = true;
+            }
+        }
+        
         let mut auxv = vec![
             AuxHeader::new(AT_PHENT, elf_header.pt2.ph_entry_size() as usize),
             AuxHeader::new(AT_PHNUM, elf_header.pt2.ph_count() as usize),
@@ -222,6 +231,7 @@ impl MemorySet {
             AuxHeader::new(AT_NOELF, 0x112d),
         ];
         
+        let mut entry_point = elf_header.pt2.entry_point() as usize;
         let mut head_va: usize = 0;
         let ph_count = elf_header.pt2.ph_count();
         let mut max_end_vpn = VirtPageNum(0);
@@ -231,7 +241,7 @@ impl MemorySet {
                 let start_va: VirtAddr = (ph.virtual_addr() as usize).into();
                 let end_va: VirtAddr = ((ph.virtual_addr() + ph.mem_size()) as usize).into();
                 let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
-                
+
                 let mut map_perm = MapPermission::U;
                 let ph_flags = ph.flags();
                 if ph_flags.is_read() {
@@ -269,6 +279,55 @@ impl MemorySet {
             }
         }
         
+        if is_dynamic {
+            let ld = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
+            let data = ld.read_all();
+            let ld_elf = ElfFile::new(&data).unwrap();
+            entry_point = ld_elf.header.pt2.entry_point() as usize;
+            for ph in ld_elf.program_iter() {
+                if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
+                    let start_va = VirtAddr::from(ph.virtual_addr() as usize);
+                    let end_va = VirtAddr::from((ph.virtual_addr() + ph.mem_size()) as usize);
+                    let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
+                    
+                    let mut map_perm = MapPermission::U;
+                    let ph_flags = ph.flags();
+                    if ph_flags.is_read() {
+                        map_perm |= MapPermission::R;
+                    }
+                    if ph_flags.is_write() {
+                        map_perm |= MapPermission::W;
+                    }
+                    if ph_flags.is_execute() {
+                        map_perm |= MapPermission::X;
+                    }
+                    
+                    let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+                    
+                    max_end_vpn = map_area.vpn_range.get_end();
+                    
+                    if offset == 0 {
+                        memory_set.push(
+                            map_area,
+                            Some(
+                                &ld_elf.input
+                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
+                            ),
+                        )
+                    } else {
+                        memory_set.push_with_offset(
+                            map_area,
+                            offset,
+                            Some(
+                                &ld_elf.input
+                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        
         //get ph_head addr
         auxv.push(AuxHeader::new(
             AT_PHDR,
@@ -279,6 +338,7 @@ impl MemorySet {
         let mut user_heap_base: usize = max_end_va.into();
         user_heap_base += PAGE_SIZE;
         let user_stack_base = user_heap_base + PAGE_SIZE;
+        memory_set.print_map_area();
         (
             memory_set,
             user_heap_base,
@@ -500,11 +560,11 @@ impl Display for MapPermission {
             self.contains(MapPermission::W),
             self.contains(MapPermission::X),
         );
-        
+    
         let read = readable.then_some("R").unwrap_or(" ");
         let write = writable.then_some("W").unwrap_or(" ");
         let exec = executable.then_some("X").unwrap_or(" ");
-        
+    
         write!(f, "{} {} {}", read, write, exec)
     }
 }
