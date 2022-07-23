@@ -301,6 +301,35 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     0
 }
 
+pub fn sys_sigprocmask(how: usize, set: *mut u32, oldset: *mut u32) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let token = current_user_token();
+
+    if oldset as usize != 0 {
+        *translated_refmut(token, oldset) = inner.signal_masks.bits();
+    }
+
+    let new_mask = *translated_refmut(token, set);
+    if new_mask == 0 {
+        return 0;
+    }
+    if let Some(new_mask) = Signum::from_bits(new_mask) {
+        match how {
+            // SIG_BLOCK The set of blocked signals is the union of the current set and the set argument.
+            0 => inner.signal_masks.insert(new_mask),
+            // SIG_UNBLOCK The signals in set are removed from the current set of blocked signals.
+            1 => inner.signal_masks.remove(new_mask),
+            // SIG_SETMASK The set of blocked signals is set to the argument set.
+            2 => *translated_refmut(token, oldset) = inner.signal_masks.bits(),
+            _ => return -1,
+        }
+        0
+    } else {
+        -1
+    }
+}
+
 pub fn sys_sigreturn() -> isize {
     let task = current_task().unwrap();
     let process = task.process.upgrade().unwrap();
@@ -315,11 +344,6 @@ pub fn sys_sigreturn() -> isize {
     *inner.get_trap_cx() = process_inner.trap_ctx_backup.unwrap();
 
     0
-}
-
-pub fn sys_sigprocmask(mask: u32) -> isize {
-    todo!();
-    1
 }
 
 pub fn sys_getitimer(which: isize, curr_value: usize) -> isize {

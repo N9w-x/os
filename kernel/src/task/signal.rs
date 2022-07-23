@@ -88,24 +88,18 @@ impl Signum {
     }
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Copy, Clone)]
-pub enum SigactionHandlerType {
-    /// 默认处理
-    SIG_DFL,
-    /// 忽略该信号
-    SIG_IGN,
-    /// Used if SA_SIGINFO is not set
-    sa_handler(fn(isize)),
-    /// Used if SA_SIGINFO is set
-    sa_sigaction(fn(isize, SigInfo, *mut SigInfo)),
-}
-
-impl Default for SigactionHandlerType {
-    fn default() -> Self {
-        Self::SIG_DFL
-    }
-}
+// #[allow(non_camel_case_types)]
+// #[derive(Copy, Clone)]
+// pub enum SigactionHandlerType {
+//     /// 默认处理
+//     SIG_DFL,
+//     /// 忽略该信号
+//     SIG_IGN,
+//     /// Used if SA_SIGINFO is not set
+//     sa_handler(fn(isize)),
+//     /// Used if SA_SIGINFO is set
+//     sa_sigaction(fn(isize, SigInfo, *mut SigInfo)),
+// }
 
 pub struct SigInfo {}
 
@@ -129,15 +123,19 @@ impl Default for SaFlags {
     }
 }
 
+pub const SIG_DFL: usize = 0; /* Default action.  */
+pub const SIG_IGN: usize = 1; /* Ignore signal.  */
+
+#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct SigAction {
     /// 信号处理函数
-    pub sigaction_handler: SigactionHandlerType,
+    pub sigaction_handler: usize,
     /// 信号处理函数执行期间需要屏蔽的信号
     pub sa_mask: Signum,
     /// 指定信号处理的行为
     pub sa_flags: SaFlags,
-    pub sa_restorer: Option<fn()>,
+    // pub sa_restorer: Option<fn()>,
 }
 
 pub fn check_pending_signals() {
@@ -237,27 +235,22 @@ pub fn call_user_signal_handler(signum: usize) {
             .remove(Signum::from_serial(signum).unwrap());
 
         let sa_flags = sigaction.sa_flags;
-        if !sa_flags.contains(SaFlags::SA_SIGINFO) {
-            match sigaction.sigaction_handler {
-                SigactionHandlerType::SIG_IGN => {}
-                SigactionHandlerType::SIG_DFL => {
-                    unimplemented!()
-                }
-                SigactionHandlerType::sa_handler(handler) => {
+        match sigaction.sigaction_handler {
+            SIG_IGN => {}
+            SIG_DFL => {
+                // 默认处理，即杀死进程
+                process_inner.killed = true;
+            }
+            handler => {
+                if !sa_flags.contains(SaFlags::SA_SIGINFO) {
+                    // sa_handler处理
                     // 设置返回用户态时首先执行handler处的代码
                     trap_cx.sepc = handler as usize;
                     trap_cx.x[10] = signum;
-                }
-                _ => panic!("when sa_flags not contains SA_SIGINFO, sigaction_handler cannot be sa_sigaction"),
-            }
-        } else {
-            match sigaction.sigaction_handler {
-                SigactionHandlerType::sa_sigaction(handler) => {
+                } else {
+                    // sa_sigaction处理
                     unimplemented!()
                 }
-                _ => panic!(
-                    "when sa_flags contains SA_SIGINFO, sigaction_handler cannot be sa_handler"
-                ),
             }
         }
     }
