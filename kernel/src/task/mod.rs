@@ -4,20 +4,21 @@ use alloc::vec::Vec;
 use lazy_static::*;
 
 pub use context::TaskContext;
-pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
+pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use info::CloneFlag;
+pub use timer::{TimeVal, ITimerVal, ITIMER_MANAGER};
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
 pub use processor::{
     current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
     current_user_token, run_tasks, schedule, take_current_task,
 };
-pub use signal::SignalFlags;
+pub use signal::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 use crate::config::PAGE_SIZE;
-use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
+use crate::fs_fat::{open_file, File, FileType, OSInode, OpenFlags};
 use crate::mm::{add_free, UserBuffer};
 
 mod context;
@@ -28,6 +29,7 @@ mod process;
 mod processor;
 mod signal;
 mod switch;
+mod timer;
 #[allow(clippy::module_inception)]
 mod task;
 
@@ -108,6 +110,8 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         // drop file descriptors
         process_inner.fd_table.clear();
     }
+    // 定时器停止计时
+    ITIMER_MANAGER.exclusive_access().remove_itimer(process.getpid());
     drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
@@ -212,7 +216,7 @@ pub fn check_signals_of_current() -> Option<(i32, &'static str)> {
     process_inner.signals.check_error()
 }
 
-pub fn current_add_signal(signal: SignalFlags) {
+pub fn current_add_signal(signal: Signum) {
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     process_inner.signals |= signal;

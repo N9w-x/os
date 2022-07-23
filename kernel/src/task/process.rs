@@ -8,17 +8,18 @@ use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE};
 use crate::console::INFO;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
 use crate::mm::{
-    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
-    translated_refmut, VirtAddr, VirtPageNum,
+    translated_ref, translated_refmut, AuxHeader, MapPermission, MemoryMapArea, MemorySet,
+    VirtAddr, VirtPageNum, KERNEL_SPACE,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
+use crate::task::SignalStruct;
 use crate::trap::{trap_handler, TrapContext};
 
-use super::{add_task, SignalFlags};
-use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
+use super::{add_task, Signum, ITimerVal};
+use super::{pid_alloc, PidHandle};
 
 pub struct ProcessControlBlock {
     // immutable
@@ -39,7 +40,18 @@ pub struct ProcessControlBlockInner {
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<FileDescriptor>>,
-    pub signals: SignalFlags,
+    /// 待响应信号
+    pub signals: Signum,
+    /// 正在响应的信号
+    pub signal_handling: usize,
+    /// 要屏蔽的信号（全局屏蔽）
+    pub signal_masks: Signum,
+    /// 信号处理方式列表
+    pub signal_actions: SignalStruct,
+    pub killed: bool,
+    pub frozen: bool,
+    /// 被打断的trap上下文
+    pub trap_ctx_backup: Option<TrapContext>,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
@@ -54,6 +66,8 @@ pub struct ProcessControlBlockInner {
     pub heap_end: VirtAddr,
     pub mmap_area_base: VirtAddr,
     pub mmap_area_end: VirtAddr,
+    // 定时器信息
+    pub itimer: ITimerVal,
 }
 
 impl ProcessControlBlockInner {
@@ -108,7 +122,7 @@ impl ProcessControlBlockInner {
         let end_va = (start + len).into();
         // 测例prot定义与MapPermission正好差一位
         let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
-    
+
         self.memory_set.insert_mmap_area(MemoryMapArea::new(
             start_va, end_va, map_perm, fd, offset, flags,
         ));
@@ -149,7 +163,13 @@ impl ProcessControlBlock {
                         // 2 -> stderr
                         Some(FileDescriptor::Abstract(Arc::new(Stdout))),
                     ],
-                    signals: SignalFlags::empty(),
+                    signals: Signum::empty(),
+                    signal_handling: 0,
+                    signal_masks: Signum::empty(),
+                    signal_actions: SignalStruct::default(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
@@ -164,6 +184,7 @@ impl ProcessControlBlock {
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
                     mmap_area_end: MEMORY_MAP_BASE.into(),
+                    itimer: ITimerVal::new(),
                 })
             },
         });
@@ -224,7 +245,7 @@ impl ProcessControlBlock {
             String::from("HOME=/"),
             String::from("PATH=/"),
         ];
-    
+
         // substitute memory_set
         let mut inner = self.inner_exclusive_access();
         inner.memory_set = memory_set;
@@ -243,9 +264,9 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         // push arguments on user stack
-    
+
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-    
+
         //stack top
         //argc
         //*argv[] with null as end
@@ -257,19 +278,19 @@ impl ProcessControlBlock {
         //argv[]
         //envp[]
         //stack bottom
-    
+
         let push_stack = |parms: Vec<String>, user_sp: &mut usize| {
             //record parm ptr
             let mut ptr_vec: Vec<usize> = (0..=parms.len()).collect();
-        
+
             //end with null
             ptr_vec[parms.len()] = 0;
-        
+
             for index in 0..parms.len() {
                 *user_sp -= parms[index].len() + 1;
                 ptr_vec[index] = *user_sp;
                 let mut p = *user_sp;
-            
+
                 //write chars to [user_sp,user_sp + len]
                 for c in parms[index].as_bytes() {
                     *translated_refmut(new_token, p as *mut u8) = *c;
@@ -279,18 +300,18 @@ impl ProcessControlBlock {
             }
             ptr_vec
         };
-    
+
         //////////////////////// envp[] ////////////////////////////////
         let envp = push_stack(envs, &mut user_sp);
         // make sure aligned to 8b for k210
         user_sp -= user_sp % core::mem::size_of::<usize>();
-    
+
         ///////////////////// argv[] /////////////////////////////////
         let argc = args.len();
         let argv = push_stack(args, &mut user_sp);
         // make the user_sp aligned to 8B for k210 platform
         user_sp -= user_sp % core::mem::size_of::<usize>();
-    
+
         ///////////////////// platform ///////////////////////////////
         let platform = "RISC-V64";
         user_sp -= platform.len() + 1;
@@ -301,7 +322,7 @@ impl ProcessControlBlock {
             p += 1;
         }
         *translated_refmut(new_token, p as *mut u8) = 0;
-    
+
         ///////////////////// rand bytes ////////////////////////////
         user_sp -= 16;
         auxv.push(AuxHeader::new(AT_RANDOM, user_sp));
@@ -310,10 +331,10 @@ impl ProcessControlBlock {
             new_token,
             (user_sp + core::mem::size_of::<usize>()) as *mut usize,
         ) = 0x08090a0b0c0d0e0f;
-    
+
         ///////////////////// padding ////////////////////////////////
         user_sp -= user_sp % 16;
-    
+
         ///////////////////// auxv[] //////////////////////////////////
         auxv.push(AuxHeader::new(AT_EXECFN, argv[0]));
         auxv.push(AuxHeader::new(AT_NULL, 0));
@@ -328,7 +349,7 @@ impl ProcessControlBlock {
             ) = aux_header.value;
             addr += core::mem::size_of::<AuxHeader>();
         }
-    
+
         ///////////////////// *envp[] /////////////////////////////////
         user_sp -= envp.len() * core::mem::size_of::<usize>();
         let envp_base = user_sp;
@@ -337,7 +358,7 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = env_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-    
+
         ///////////////////// *argv[] ////////////////////////////////
         user_sp -= argv.len() * core::mem::size_of::<usize>();
         let argv_base = user_sp;
@@ -346,11 +367,11 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = argv_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-    
+
         ///////////////////// argc ///////////////////////////////////
         user_sp -= core::mem::size_of::<usize>();
         *translated_refmut(new_token, user_sp as *mut usize) = argc;
-    
+
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -359,7 +380,7 @@ impl ProcessControlBlock {
             task.kstack.get_top(),
             trap_handler as usize,
         );
-    
+
         trap_cx.x[10] = argc; //argc
         trap_cx.x[11] = argv_base; //argv
         trap_cx.x[12] = envp_base; //envp
@@ -397,7 +418,13 @@ impl ProcessControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
-                    signals: SignalFlags::empty(),
+                    signals: Signum::empty(),
+                    signal_handling: 0,
+                    signal_masks: Signum::empty(),
+                    signal_actions: SignalStruct::default(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
@@ -412,6 +439,7 @@ impl ProcessControlBlock {
                     heap_end: parent.heap_end,
                     mmap_area_base: parent.mmap_area_base,
                     mmap_area_end: parent.mmap_area_end,
+                    itimer: ITimerVal::new(),
                 })
             },
         });

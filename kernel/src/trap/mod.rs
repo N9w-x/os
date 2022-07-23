@@ -12,7 +12,11 @@ pub use lazy::lazy_check;
 use crate::config::TRAMPOLINE;
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
 use crate::syscall::syscall;
-use crate::task::{check_signals_of_current, current_add_signal, current_process, current_trap_cx, current_trap_cx_user_va, current_user_token, exit_current_and_run_next, SignalFlags, suspend_current_and_run_next};
+use crate::task::{
+    check_signals_of_current, current_add_signal, current_process, current_task, current_trap_cx,
+    current_trap_cx_user_va, current_user_token, exit_current_and_run_next, handle_signals, suspend_current_and_run_next, SaFlags, Signum,
+    ITIMER_MANAGER,
+};
 use crate::timer::{check_timer, set_next_trigger};
 
 mod context;
@@ -71,9 +75,9 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-    
+
             enable_supervisor_interrupt();
-    
+
             // get system call return value
             let result = syscall(
                 cx.x[17],
@@ -91,7 +95,7 @@ pub fn trap_handler() -> ! {
                 stval,
                 current_trap_cx().sepc
             );
-            current_add_signal(SignalFlags::SIGSEGV);
+            current_add_signal(Signum::SIGSEGV);
         }
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault)
@@ -118,19 +122,20 @@ pub fn trap_handler() -> ! {
                     stval,
                     current_trap_cx().sepc
                 );
-                current_add_signal(SignalFlags::SIGSEGV);
+                current_add_signal(Signum::SIGSEGV);
             }
             unsafe {
                 asm!("sfence.vma");
-                asm!("fence.i" );
+                asm!("fence.i");
             }
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            current_add_signal(SignalFlags::SIGILL);
+            current_add_signal(Signum::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
+            ITIMER_MANAGER.exclusive_access().check_itimer(); // 检查定时器
             suspend_current_and_run_next();
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
@@ -144,11 +149,15 @@ pub fn trap_handler() -> ! {
             );
         }
     }
+
+    handle_signals();
+
     // check signals
     if let Some((errno, msg)) = check_signals_of_current() {
         println!("[kernel] {}", msg);
         exit_current_and_run_next(errno);
     }
+
     trap_return();
 }
 
@@ -187,7 +196,8 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
-            // do not schedule now
+            ITIMER_MANAGER.exclusive_access().check_itimer(); // 检查定时器
+                                                              // do not schedule now
         }
         _ => {
             panic!(
