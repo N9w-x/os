@@ -11,8 +11,8 @@ use xmas_elf::ElfFile;
 
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
-    AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, MEMORY_END, MMIO,
-    PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
+    AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
+    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
 };
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
@@ -194,6 +194,56 @@ impl MemorySet {
         memory_set
     }
     
+    // 动态链接程序装载interpreter
+    // (entry_point,base_va)
+    fn map_interpreter(&mut self) -> (usize, usize) {
+        let file = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
+        let data = file.read_all();
+        
+        let ld_elf = ElfFile::new(&data).unwrap();
+        let ld_header = ld_elf.header;
+        let magic = ld_header.pt1.magic;
+        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "not valid elf");
+        
+        let mut head_va = 0usize;
+        let base = 0x2000_0000usize;
+        
+        for ph in ld_elf.program_iter() {
+            if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
+                let start_va = VirtAddr::from(ph.virtual_addr() as usize + base);
+                let end_va = VirtAddr::from(start_va.0 + ph.mem_size() as usize);
+                let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
+                if head_va == 0 {
+                    head_va = start_va.0
+                }
+                
+                let perm = ph.flags();
+                let mut map_perm = MapPermission::U;
+                if perm.is_read() {
+                    map_perm |= MapPermission::R
+                }
+                if perm.is_write() {
+                    map_perm |= MapPermission::W
+                }
+                if perm.is_execute() {
+                    map_perm |= MapPermission::X
+                }
+                
+                let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+                self.push_with_offset(
+                    map_area,
+                    offset,
+                    Some(
+                        &ld_elf.input
+                            [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
+                    ),
+                )
+            }
+        }
+        
+        (ld_header.pt2.entry_point() as usize + base, base)
+    }
+    
     /// Include sections in elf and trampoline,
     /// also returns user_sp_base and entry point.
     /// return (memory set,user heap base, user stack base,exec entry )
@@ -204,20 +254,11 @@ impl MemorySet {
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
-        
-        let mut is_dynamic = false;
-        
-        for section in elf.section_iter() {
-            if let Ok(".interp") = section.get_name(&elf) {
-                is_dynamic = true;
-            }
-        }
-        
+
         let mut auxv = vec![
             AuxHeader::new(AT_PHENT, elf_header.pt2.ph_entry_size() as usize),
             AuxHeader::new(AT_PHNUM, elf_header.pt2.ph_count() as usize),
             AuxHeader::new(AT_PAGESIZE, PAGE_SIZE as usize),
-            AuxHeader::new(AT_BASE, 0),
             AuxHeader::new(AT_FLAGS, 0),
             AuxHeader::new(AT_ENTRY, elf_header.pt2.entry_point() as usize),
             AuxHeader::new(AT_UID, 0),
@@ -226,11 +267,11 @@ impl MemorySet {
             AuxHeader::new(AT_EGID, 0),
             AuxHeader::new(AT_PLATFORM, 0),
             AuxHeader::new(AT_HWCAP, 0),
-            AuxHeader::new(AT_CLKTCK, 100),
+            AuxHeader::new(AT_CLKTCK, CLOCK_FREQ),
             AuxHeader::new(AT_SECURE, 0),
             AuxHeader::new(AT_NOELF, 0x112d),
         ];
-        
+
         let mut entry_point = elf_header.pt2.entry_point() as usize;
         let mut head_va: usize = 0;
         let ph_count = elf_header.pt2.ph_count();
@@ -253,10 +294,10 @@ impl MemorySet {
                 if ph_flags.is_execute() {
                     map_perm |= MapPermission::X;
                 }
-                
+    
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 max_end_vpn = map_area.vpn_range.get_end();
-                
+    
                 if offset == 0 {
                     head_va = start_va.into();
                     memory_set.push(
@@ -279,54 +320,14 @@ impl MemorySet {
             }
         }
         
-        if is_dynamic {
-            let ld = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
-            let data = ld.read_all();
-            let ld_elf = ElfFile::new(&data).unwrap();
-            entry_point = ld_elf.header.pt2.entry_point() as usize;
-            for ph in ld_elf.program_iter() {
-                if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
-                    let start_va = VirtAddr::from(ph.virtual_addr() as usize);
-                    let end_va = VirtAddr::from((ph.virtual_addr() + ph.mem_size()) as usize);
-                    let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
-                    
-                    let mut map_perm = MapPermission::U;
-                    let ph_flags = ph.flags();
-                    if ph_flags.is_read() {
-                        map_perm |= MapPermission::R;
-                    }
-                    if ph_flags.is_write() {
-                        map_perm |= MapPermission::W;
-                    }
-                    if ph_flags.is_execute() {
-                        map_perm |= MapPermission::X;
-                    }
-                    
-                    let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
-                    
-                    max_end_vpn = map_area.vpn_range.get_end();
-                    
-                    if offset == 0 {
-                        memory_set.push(
-                            map_area,
-                            Some(
-                                &ld_elf.input
-                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
-                            ),
-                        )
-                    } else {
-                        memory_set.push_with_offset(
-                            map_area,
-                            offset,
-                            Some(
-                                &ld_elf.input
-                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
-                            ),
-                        )
-                    }
-                }
-            }
-        }
+        let base_va = if elf.find_section_by_name(".interp").is_some() {
+            let mut t = 0;
+            (entry_point, t) = memory_set.map_interpreter();
+            t
+        } else {
+            0
+        };
+        auxv.push(AuxHeader::new(AT_BASE, base_va));
         
         //get ph_head addr
         auxv.push(AuxHeader::new(
@@ -343,7 +344,7 @@ impl MemorySet {
             memory_set,
             user_heap_base,
             user_stack_base,
-            elf.header.pt2.entry_point() as usize,
+            entry_point,
             auxv,
         )
     }
