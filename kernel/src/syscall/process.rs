@@ -227,12 +227,17 @@ pub fn sys_mmap(
 ) -> isize {
     let align_start = align_up(current_process().inner_exclusive_access().mmap_area_end.0);
     let align_len = align_up(len);
+    let adjust_fd = if fd as isize == -1 {
+        current_process().inner_exclusive_access().alloc_fd()
+    } else {
+        fd
+    };
     current_process().inner_exclusive_access().mmap(
         align_start,
         align_len,
         prot,
         flags,
-        fd,
+        adjust_fd,
         offset,
     );
     lazy_check(align_start);
