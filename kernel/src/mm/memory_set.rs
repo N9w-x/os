@@ -338,7 +338,7 @@ impl MemorySet {
         let mut user_heap_base: usize = max_end_va.into();
         user_heap_base += PAGE_SIZE;
         let user_stack_base = user_heap_base + PAGE_SIZE;
-        memory_set.print_map_area();
+        //memory_set.print_map_area();
         (
             memory_set,
             user_heap_base,

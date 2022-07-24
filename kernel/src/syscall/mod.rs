@@ -6,7 +6,7 @@ use sync::*;
 use thread::*;
 use utils::*;
 
-use crate::console::ERROR;
+use crate::console::{ERROR, INFO};
 use crate::const_def;
 
 const SYSCALL_LINK_AT: usize = 37;
@@ -88,6 +88,10 @@ mod thread;
 mod utils;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
+    //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
+    //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
+    //}
+    
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -156,9 +160,11 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
         SYSCALL_PRLIMIT64 => 0,
-        SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
+        //SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as usize),
-        SYSCALL_SETITIMER => sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize),
+        SYSCALL_SETITIMER => {
+            sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize)
+        }
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
