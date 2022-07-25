@@ -7,9 +7,10 @@ use fat32::{ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY, ATTRIBUTE_LFN, BLOCK_SZ};
 use lazy_static::lazy_static;
 use spin::Mutex;
 
+use crate::config::USER_STACK_SIZE;
 use crate::drivers::BLOCK_DEVICE;
-use crate::fs_fat::fs_info::{VFSFlag, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN};
-use crate::fs_fat::{get_current_inode, Dirent, File, Kstat};
+use crate::fs_fat::{Dirent, File, get_current_inode, Kstat};
+use crate::fs_fat::fs_info::{DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, VFSFlag};
 use crate::mm::UserBuffer;
 use crate::task::current_user_token;
 
@@ -154,7 +155,7 @@ impl OSInode {
             }
         }
         .bits();
-
+    
         fstat.update(
             inode_num,
             st_mode,
@@ -163,6 +164,36 @@ impl OSInode {
             modify_t,
             create_t,
         );
+    }
+    
+    pub fn lseek(&self, offset: isize, whence: i32) -> isize {
+        const SEEK_SET: i32 = 0;
+        const SEEK_CUR: i32 = 1;
+        const SEEK_END: i32 = 2;
+        let mut inner = self.inner.lock();
+        if whence == SEEK_CUR {
+            if inner.offset as isize + offset < 0 {
+                return -1;
+            }
+        } else if offset < 0 {
+            return -1;
+        }
+        
+        match whence {
+            SEEK_SET => {
+                inner.offset = offset as usize;
+            }
+            SEEK_CUR => {
+                inner.offset += offset as usize;
+            }
+            SEEK_END => {
+                let size = inner.inode.get_size();
+                inner.offset = (size as usize + offset as usize);
+            }
+            _ => return -1,
+        }
+        
+        inner.offset as isize
     }
 }
 
@@ -199,7 +230,7 @@ impl File for OSInode {
                 break;
             }
             inner.offset += size;
-            write_size + size;
+            write_size += size;
         }
         write_size
     }
