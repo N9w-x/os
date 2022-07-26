@@ -12,7 +12,7 @@ use xmas_elf::ElfFile;
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
-    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
+    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_ANONYMOUS,
 };
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
@@ -48,8 +48,7 @@ pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
     heap: BTreeMap<VirtPageNum, FrameTracker>,
-    // user heap
-    mmap_areas: Vec<MemoryMapArea>, //
+    mmap_areas: Vec<MemoryMapArea>,
 }
 
 impl MemorySet {
@@ -366,6 +365,36 @@ impl MemorySet {
                     .copy_from_slice(src_ppn.get_bytes_array());
             }
         }
+        // // copy heap
+        // for (vpn, src_frame) in user_space.heap.iter() {
+        //     let dst_frame = frame_alloc().unwrap();
+        //     let dst_ppn = dst_frame.ppn;
+        //     memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+        //     memory_set.heap.insert(*vpn, dst_frame);
+
+        //     let src_ppn = src_frame.ppn;
+        //     // copy data
+        //     dst_ppn
+        //         .get_bytes_array()
+        //         .copy_from_slice(src_ppn.get_bytes_array());
+        // }
+        // // copy mmap
+        // for mmap_area in user_space.mmap_areas.iter() {
+        //     let mut new_mmap_area = MemoryMapArea::from_another(mmap_area);
+        //     for vpn in mmap_area.vpn_range {
+        //         if let Some(pte) = user_space.translate(vpn) {// lazy可能未分配内存
+        //             let src_ppn = pte.ppn();
+        //             let frame = frame_alloc().unwrap();
+        //             let dst_ppn = frame.ppn;
+        //             // copy data
+        //             dst_ppn
+        //                 .get_bytes_array()
+        //                 .copy_from_slice(src_ppn.get_bytes_array());
+        //             new_mmap_area.data_frames.insert(vpn, frame);
+        //         }
+        //     }
+
+        // }
         memory_set
     }
     
@@ -427,6 +456,13 @@ impl MemorySet {
         fd_table: Vec<Option<FileDescriptor>>,
     ) -> bool {
         let vpn: VirtPageNum = va.floor();
+
+        // println!("===========");
+        // for ele in self.mmap_areas.iter() {
+        //     println!("{:#x} - {:#x}", VirtAddr::from(ele.vpn_range.get_start()).0, VirtAddr::from(ele.vpn_range.get_end()).0);
+        // }
+        // println!("===========");
+
         if let Some(area) = self
             .mmap_areas
             .iter_mut()
@@ -623,6 +659,17 @@ impl MemoryMapArea {
             flags,
         }
     }
+
+    pub fn from_another(another: &MemoryMapArea) -> Self {
+        Self {
+            vpn_range: another.vpn_range.clone(),
+            data_frames: BTreeMap::new(),
+            map_perm: another.map_perm,
+            fd: another.fd,
+            offset: another.offset,
+            flags: another.flags,
+        }
+    }
     
     pub fn map_one(
         &mut self,
@@ -640,31 +687,30 @@ impl MemoryMapArea {
         
         // 复制文件数据到内存
         if let Some(file_descriptor) = &fd_table[self.fd] {
-            return match file_descriptor {
+            match file_descriptor {
                 FileDescriptor::Regular(inode) => {
                     if inode.readable() {
                         let va: usize = VirtAddr::from(vpn).into();
                         let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
                         let page_offset = va - mmap_base + self.offset;
                         let buf =
-                            translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+                        translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
                         inode.set_offset(page_offset);
                         inode.read(UserBuffer::new(buf));
-                        return true;
                     }
-                    false
                 }
-                _ => false,
+                FileDescriptor::Abstract(_) => todo!(),
             };
         }
-        false
+        return true;
     }
     
     pub fn unmap(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
-            self.data_frames.remove(&vpn);
-            // sys_mmap采取lazy策略, sys_munmap时可能未分配内存, 因此不能unmap
-            // page_table.unmap(vpn);
+            if self.data_frames.contains_key(&vpn) {
+                self.data_frames.remove(&vpn);
+                page_table.unmap(vpn);
+            }
         }
     }
 }

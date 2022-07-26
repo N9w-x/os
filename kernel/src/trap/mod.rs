@@ -101,12 +101,12 @@ pub fn trap_handler() -> ! {
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
-            let cause = scause.cause();
-            if cause == Trap::Exception(Exception::LoadPageFault) {
-                let pcb = current_process();
-                let inner = pcb.inner_exclusive_access();
-                inner.memory_set.print_map_area();
-            }
+            // let cause = scause.cause();
+            // if cause == Trap::Exception(Exception::LoadPageFault) {
+            //     let pcb = current_process();
+            //     let inner = pcb.inner_exclusive_access();
+            //     inner.memory_set.print_map_area();
+            // }
             //let cause = scause.cause();
             //if cause == Trap::Exception(Exception::LoadPageFault) {
             //    let pcb = current_process();

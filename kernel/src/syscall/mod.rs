@@ -92,7 +92,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     //}
-
+    // println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
+    
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
