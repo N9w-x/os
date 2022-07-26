@@ -212,7 +212,20 @@ pub fn sys_brk(addr: usize) -> isize {
     } else if addr < inner.heap_base.0 {
         -1
     } else {
-        inner.heap_end = addr.into();
+        let mut old_end = inner.heap_end.0;
+        let align_end = align_up(addr);
+        inner.heap_end = align_end.into();
+
+        // remove lazy
+        drop(inner);
+        loop {
+            if old_end >= align_end {
+                break;
+            }
+            lazy_check(old_end);
+            old_end += PAGE_SIZE;
+        }
+        
         addr as isize
     }
 }

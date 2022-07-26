@@ -1,7 +1,7 @@
 #[allow(unused)]
 pub use crate::board::{CLOCK_FREQ, MMIO};
 
-pub const USER_STACK_SIZE: usize = 4096 * 2;
+pub const USER_STACK_SIZE: usize = 4096 * 6;
 //0x2000
 pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
 pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x300;
