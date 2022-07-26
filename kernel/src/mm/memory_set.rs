@@ -11,8 +11,8 @@ use xmas_elf::ElfFile;
 
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
-    AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, MEMORY_END, MMIO,
-    PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
+    AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
+    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_ANONYMOUS,
 };
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
@@ -48,8 +48,7 @@ pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
     heap: BTreeMap<VirtPageNum, FrameTracker>,
-    // user heap
-    mmap_areas: Vec<MemoryMapArea>, //
+    mmap_areas: Vec<MemoryMapArea>,
 }
 
 impl MemorySet {
@@ -194,6 +193,56 @@ impl MemorySet {
         memory_set
     }
     
+    // 动态链接程序装载interpreter
+    // (entry_point,base_va)
+    fn map_interpreter(&mut self) -> (usize, usize) {
+        let file = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
+        let data = file.read_all();
+        
+        let ld_elf = ElfFile::new(&data).unwrap();
+        let ld_header = ld_elf.header;
+        let magic = ld_header.pt1.magic;
+        assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "not valid elf");
+        
+        let mut head_va = 0usize;
+        let base = 0x2000_0000usize;
+        
+        for ph in ld_elf.program_iter() {
+            if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
+                let start_va = VirtAddr::from(ph.virtual_addr() as usize + base);
+                let end_va = VirtAddr::from(start_va.0 + ph.mem_size() as usize);
+                let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
+                if head_va == 0 {
+                    head_va = start_va.0
+                }
+                
+                let perm = ph.flags();
+                let mut map_perm = MapPermission::U;
+                if perm.is_read() {
+                    map_perm |= MapPermission::R
+                }
+                if perm.is_write() {
+                    map_perm |= MapPermission::W
+                }
+                if perm.is_execute() {
+                    map_perm |= MapPermission::X
+                }
+                
+                let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
+                self.push_with_offset(
+                    map_area,
+                    offset,
+                    Some(
+                        &ld_elf.input
+                            [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
+                    ),
+                )
+            }
+        }
+        
+        (ld_header.pt2.entry_point() as usize + base, base)
+    }
+    
     /// Include sections in elf and trampoline,
     /// also returns user_sp_base and entry point.
     /// return (memory set,user heap base, user stack base,exec entry )
@@ -204,20 +253,11 @@ impl MemorySet {
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
         let elf_header = elf.header;
-        
-        let mut is_dynamic = false;
-        
-        for section in elf.section_iter() {
-            if let Ok(".interp") = section.get_name(&elf) {
-                is_dynamic = true;
-            }
-        }
-        
+
         let mut auxv = vec![
             AuxHeader::new(AT_PHENT, elf_header.pt2.ph_entry_size() as usize),
             AuxHeader::new(AT_PHNUM, elf_header.pt2.ph_count() as usize),
             AuxHeader::new(AT_PAGESIZE, PAGE_SIZE as usize),
-            AuxHeader::new(AT_BASE, 0),
             AuxHeader::new(AT_FLAGS, 0),
             AuxHeader::new(AT_ENTRY, elf_header.pt2.entry_point() as usize),
             AuxHeader::new(AT_UID, 0),
@@ -226,11 +266,11 @@ impl MemorySet {
             AuxHeader::new(AT_EGID, 0),
             AuxHeader::new(AT_PLATFORM, 0),
             AuxHeader::new(AT_HWCAP, 0),
-            AuxHeader::new(AT_CLKTCK, 100),
+            AuxHeader::new(AT_CLKTCK, CLOCK_FREQ),
             AuxHeader::new(AT_SECURE, 0),
             AuxHeader::new(AT_NOELF, 0x112d),
         ];
-        
+
         let mut entry_point = elf_header.pt2.entry_point() as usize;
         let mut head_va: usize = 0;
         let ph_count = elf_header.pt2.ph_count();
@@ -253,10 +293,10 @@ impl MemorySet {
                 if ph_flags.is_execute() {
                     map_perm |= MapPermission::X;
                 }
-                
+    
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 max_end_vpn = map_area.vpn_range.get_end();
-                
+    
                 if offset == 0 {
                     head_va = start_va.into();
                     memory_set.push(
@@ -279,54 +319,14 @@ impl MemorySet {
             }
         }
         
-        if is_dynamic {
-            let ld = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
-            let data = ld.read_all();
-            let ld_elf = ElfFile::new(&data).unwrap();
-            entry_point = ld_elf.header.pt2.entry_point() as usize;
-            for ph in ld_elf.program_iter() {
-                if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
-                    let start_va = VirtAddr::from(ph.virtual_addr() as usize);
-                    let end_va = VirtAddr::from((ph.virtual_addr() + ph.mem_size()) as usize);
-                    let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
-                    
-                    let mut map_perm = MapPermission::U;
-                    let ph_flags = ph.flags();
-                    if ph_flags.is_read() {
-                        map_perm |= MapPermission::R;
-                    }
-                    if ph_flags.is_write() {
-                        map_perm |= MapPermission::W;
-                    }
-                    if ph_flags.is_execute() {
-                        map_perm |= MapPermission::X;
-                    }
-                    
-                    let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
-                    
-                    max_end_vpn = map_area.vpn_range.get_end();
-                    
-                    if offset == 0 {
-                        memory_set.push(
-                            map_area,
-                            Some(
-                                &ld_elf.input
-                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
-                            ),
-                        )
-                    } else {
-                        memory_set.push_with_offset(
-                            map_area,
-                            offset,
-                            Some(
-                                &ld_elf.input
-                                    [ph.offset() as usize..(ph.offset() + ph.file_size()) as usize],
-                            ),
-                        )
-                    }
-                }
-            }
-        }
+        let base_va = if elf.find_section_by_name(".interp").is_some() {
+            let mut t = 0;
+            (entry_point, t) = memory_set.map_interpreter();
+            t
+        } else {
+            0
+        };
+        auxv.push(AuxHeader::new(AT_BASE, base_va));
         
         //get ph_head addr
         auxv.push(AuxHeader::new(
@@ -343,7 +343,7 @@ impl MemorySet {
             memory_set,
             user_heap_base,
             user_stack_base,
-            elf.header.pt2.entry_point() as usize,
+            entry_point,
             auxv,
         )
     }
@@ -365,6 +365,36 @@ impl MemorySet {
                     .copy_from_slice(src_ppn.get_bytes_array());
             }
         }
+        // // copy heap
+        // for (vpn, src_frame) in user_space.heap.iter() {
+        //     let dst_frame = frame_alloc().unwrap();
+        //     let dst_ppn = dst_frame.ppn;
+        //     memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+        //     memory_set.heap.insert(*vpn, dst_frame);
+
+        //     let src_ppn = src_frame.ppn;
+        //     // copy data
+        //     dst_ppn
+        //         .get_bytes_array()
+        //         .copy_from_slice(src_ppn.get_bytes_array());
+        // }
+        // // copy mmap
+        // for mmap_area in user_space.mmap_areas.iter() {
+        //     let mut new_mmap_area = MemoryMapArea::from_another(mmap_area);
+        //     for vpn in mmap_area.vpn_range {
+        //         if let Some(pte) = user_space.translate(vpn) {// lazy可能未分配内存
+        //             let src_ppn = pte.ppn();
+        //             let frame = frame_alloc().unwrap();
+        //             let dst_ppn = frame.ppn;
+        //             // copy data
+        //             dst_ppn
+        //                 .get_bytes_array()
+        //                 .copy_from_slice(src_ppn.get_bytes_array());
+        //             new_mmap_area.data_frames.insert(vpn, frame);
+        //         }
+        //     }
+
+        // }
         memory_set
     }
     
@@ -426,6 +456,13 @@ impl MemorySet {
         fd_table: Vec<Option<FileDescriptor>>,
     ) -> bool {
         let vpn: VirtPageNum = va.floor();
+
+        // println!("===========");
+        // for ele in self.mmap_areas.iter() {
+        //     println!("{:#x} - {:#x}", VirtAddr::from(ele.vpn_range.get_start()).0, VirtAddr::from(ele.vpn_range.get_end()).0);
+        // }
+        // println!("===========");
+
         if let Some(area) = self
             .mmap_areas
             .iter_mut()
@@ -622,6 +659,17 @@ impl MemoryMapArea {
             flags,
         }
     }
+
+    pub fn from_another(another: &MemoryMapArea) -> Self {
+        Self {
+            vpn_range: another.vpn_range.clone(),
+            data_frames: BTreeMap::new(),
+            map_perm: another.map_perm,
+            fd: another.fd,
+            offset: another.offset,
+            flags: another.flags,
+        }
+    }
     
     pub fn map_one(
         &mut self,
@@ -639,31 +687,30 @@ impl MemoryMapArea {
         
         // 复制文件数据到内存
         if let Some(file_descriptor) = &fd_table[self.fd] {
-            return match file_descriptor {
+            match file_descriptor {
                 FileDescriptor::Regular(inode) => {
                     if inode.readable() {
                         let va: usize = VirtAddr::from(vpn).into();
                         let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
                         let page_offset = va - mmap_base + self.offset;
                         let buf =
-                            translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+                        translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
                         inode.set_offset(page_offset);
                         inode.read(UserBuffer::new(buf));
-                        return true;
                     }
-                    false
                 }
-                _ => false,
+                FileDescriptor::Abstract(_) => todo!(),
             };
         }
-        false
+        return true;
     }
     
     pub fn unmap(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
-            self.data_frames.remove(&vpn);
-            // sys_mmap采取lazy策略, sys_munmap时可能未分配内存, 因此不能unmap
-            // page_table.unmap(vpn);
+            if self.data_frames.contains_key(&vpn) {
+                self.data_frames.remove(&vpn);
+                page_table.unmap(vpn);
+            }
         }
     }
 }

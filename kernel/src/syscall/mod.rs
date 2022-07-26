@@ -74,6 +74,7 @@ const SYSCALL_SIG_ACTION: usize = 134;
 const SYSCALL_SIG_PROC_MASK: usize = 135;
 
 const SYSCALL_PRLIMIT64: usize = 261;
+const SYSCALL_LSEEK: usize = 62;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_WRITEV, 66);
@@ -92,6 +93,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     //}
+    // println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
 
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
@@ -168,6 +170,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize)
         }
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
+        SYSCALL_LSEEK => sys_lseek(args[0] as isize, args[1] as isize, args[2] as i32),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {

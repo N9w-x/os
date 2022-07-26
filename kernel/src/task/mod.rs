@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use lazy_static::*;
 
 pub use context::TaskContext;
-pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
+pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
 pub use info::CloneFlag;
 pub use timer::{TimeVal, TimeSpec, ITimerVal, ITIMER_MANAGER};
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
@@ -18,7 +18,7 @@ use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 use crate::config::PAGE_SIZE;
-use crate::fs_fat::{open_file, File, FileType, OSInode, OpenFlags};
+use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
 use crate::mm::{add_free, UserBuffer};
 
 mod context;
@@ -29,9 +29,9 @@ mod process;
 mod processor;
 mod signal;
 mod switch;
-mod timer;
 #[allow(clippy::module_inception)]
 mod task;
+mod timer;
 
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
@@ -111,7 +111,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         process_inner.fd_table.clear();
     }
     // 定时器停止计时
-    ITIMER_MANAGER.exclusive_access().remove_itimer(process.getpid());
+    ITIMER_MANAGER
+        .exclusive_access()
+        .remove_itimer(process.getpid());
     drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
@@ -143,6 +145,7 @@ pub fn add_initproc_into_fs() {
     let mut app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
 
     open_file("/", "mnt", OpenFlags::CREATE, FileType::Dir);
+    open_file("/", "tmp", OpenFlags::CREATE, FileType::Dir);
 
     // find if there already exits
     // println!("Find if there already exits ");

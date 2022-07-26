@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::config::CLOCK_FREQ;
+use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE};
 use crate::console::INFO;
 use crate::fs_fat::{FileType, open_file, OpenFlags};
 use crate::mm::{
@@ -225,17 +225,37 @@ pub fn sys_mmap(
     fd: usize,
     offset: usize,
 ) -> isize {
-    let align_start = align_up(current_process().inner_exclusive_access().mmap_area_end.0);
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let align_start = align_up(inner.mmap_area_end.0);
     let align_len = align_up(len);
-    current_process().inner_exclusive_access().mmap(
+    let adjust_fd = if fd as isize == -1 {
+        inner.alloc_fd()
+    } else if flags & MAP_ANONYMOUS != 0 {
+        inner.alloc_specific_fd(fd)
+    } else {
+        fd
+    };
+    inner.mmap(
         align_start,
         align_len,
         prot,
         flags,
-        fd,
+        adjust_fd,
         offset,
     );
-    lazy_check(align_start);
+
+    // remove lazy
+    drop(inner);
+    let mut addr = align_start;
+    loop {
+        if addr >= align_start + align_len {
+            break;
+        }
+        lazy_check(addr);
+        addr += PAGE_SIZE;
+    }
+
     align_start as isize
 }
 

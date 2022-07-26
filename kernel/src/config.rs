@@ -14,8 +14,7 @@ pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
 pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 
 pub const USER_STACK_BASE: usize = 0x1_0000_0000;
-// 4GB
-pub const MEMORY_MAP_BASE: usize = 0x8000_0000; // 2GB
+pub const MEMORY_MAP_BASE: usize = 0x8000_0000;
 
 #[macro_export]
 macro_rules! const_def {
@@ -23,6 +22,27 @@ macro_rules! const_def {
         pub const $ident: usize = $val;
     };
 }
+
+// mmap flag
+const_def!(MAP_FILE, 0);
+const_def!(MAP_SHARED, 0x01);
+const_def!(MAP_PRIVATE, 0x02);
+const_def!(MAP_SHARED_VALIDATE, 0x03);
+const_def!(MAP_TYPE, 0x0f);
+const_def!(MAP_FIXED, 0x10);
+const_def!(MAP_ANON, 0x20);
+const_def!(MAP_ANONYMOUS, MAP_ANON);
+const_def!(MAP_NORESERVE, 0x4000);
+const_def!(MAP_GROWSDOWN, 0x0100);
+const_def!(MAP_DENYWRITE, 0x0800);
+const_def!(MAP_EXECUTABLE, 0x1000);
+const_def!(MAP_LOCKED, 0x2000);
+const_def!(MAP_POPULATE, 0x8000);
+const_def!(MAP_NONBLOCK, 0x10000);
+const_def!(MAP_STACK, 0x20000);
+const_def!(MAP_HUGETLB, 0x40000);
+const_def!(MAP_SYNC, 0x80000);
+const_def!(MAP_FIXED_NOREPLACE, 0x100000);
 
 //aux typ
 const_def!(AT_NULL, 0);

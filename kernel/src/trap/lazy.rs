@@ -1,5 +1,5 @@
-use crate::task::current_process;
-
+use crate::{console::INFO, task::current_process};
+use alloc::format;
 
 pub fn lazy_check(addr: usize) -> bool {
     let process = current_process();
@@ -11,6 +11,17 @@ pub fn lazy_check(addr: usize) -> bool {
     let heap_end = inner.heap_end.0;
     let mmap_area_base = inner.mmap_area_base.0;
     let mmap_area_end = inner.mmap_area_end.0;
+
+    // println!(
+    //     "{}",
+    //     color!(
+    //         format!(
+    //             "addr: {:#x}, heap: {:#x} - {:#x}, mmap: {:#x} - {:#x}",
+    //             addr, heap_base, heap_end, mmap_area_base, mmap_area_end
+    //         ),
+    //         INFO
+    //     )
+    // );
 
     if heap_base <= addr && addr < heap_end {
         inner.memory_set.lazy_alloc_heap(va)

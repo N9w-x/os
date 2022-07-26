@@ -304,7 +304,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
             _ => return -1,
         }
     };
-    
+
     os_inode.get_fstat(&mut kstat);
     user_buf.write(kstat.as_bytes());
     0
@@ -399,7 +399,7 @@ pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
         if !file.writable() {
             return -1;
         }
-        
+    
         for i in 0..iov_cnt {
             let iov_ref = translated_ref(
                 token,
@@ -429,6 +429,20 @@ pub fn sys_fs(option: usize, fs_name: usize, buf: usize) -> isize {
             0
         }
         3 => 1,
+        _ => -1,
+    }
+}
+
+pub fn sys_lseek(fd: isize, offset: isize, whence: i32) -> isize {
+    let pcb = current_process();
+    let inner = pcb.inner_exclusive_access();
+    
+    if fd as usize >= inner.fd_table.len() {
+        return -1;
+    }
+    
+    match &inner.fd_table[fd as usize] {
+        Some(FileDescriptor::Regular(os_inode)) => os_inode.lseek(offset, whence),
         _ => -1,
     }
 }
