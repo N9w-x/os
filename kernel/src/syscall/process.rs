@@ -12,11 +12,11 @@ use crate::mm::{
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, CloneFlag, current_process, current_task, current_user_token,
-    exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, pid2process, SigAction, Signum,
-    suspend_current_and_run_next,
+    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
+    pid2process, suspend_current_and_run_next, CloneFlag, ITimerVal, SigAction, SigInfo, Signum,
+    TimeSpec, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
 };
-use crate::timer::{get_time, get_time_ms, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
+use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use crate::trap::lazy_check;
 
 pub fn sys_exit(exit_code: i32) -> ! {
@@ -311,32 +311,66 @@ pub fn sys_sigprocmask(how: usize, set: *mut u32, oldset: *mut u32) -> isize {
     if oldset as usize != 0 {
         *translated_refmut(token, oldset) = inner.signal_masks.bits();
     }
-    let new_mask = *translated_refmut(token, set);
-    if new_mask == 0 {
+
+    if set as usize == 0 {
         return 0;
     }
+    let new_mask = *translated_refmut(token, set);
 
     if let Some(new_mask) = Signum::from_bits(new_mask) {
-        const SIG_BLOCK: usize = 0;
-        const SIG_UNBLOCK: usize = 1;
-        const SIG_SETMASK: usize = 2;
         match how {
             // SIG_BLOCK The set of blocked signals is the union of the current set and the set argument.
             SIG_BLOCK => inner.signal_masks.insert(new_mask),
             // SIG_UNBLOCK The signals in set are removed from the current set of blocked signals.
             SIG_UNBLOCK => inner.signal_masks.remove(new_mask),
             // SIG_SETMASK The set of blocked signals is set to the argument set.
-            SIG_SETMASK => {
-                if oldset as usize != 0 {
-                    *translated_refmut(token, oldset) = inner.signal_masks.bits()
-                }
-            }
+            SIG_SETMASK => *translated_refmut(token, set) = inner.signal_masks.bits(),
             _ => return -1,
         }
         0
     } else {
         -1
     }
+}
+
+pub fn sys_sigtimedwait(set: *mut u32, info: *mut usize, timeout: *mut usize) -> isize {
+    if set as usize == 0 {
+        return -1;
+    }
+
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let token = inner.get_user_token();
+
+    if timeout as usize == 0 {
+        return -1;
+    }
+    let timeout = translated_refmut(token, timeout as *mut TimeSpec).to_nsec();
+
+    let info = (info as usize != 0).then_some(translated_refmut(token, info as *mut SigInfo));
+
+    let start = get_time_ns();
+    while *translated_refmut(token, set) == 0 {
+        let now = get_time_ns();
+        if now - start >= timeout {
+            return -1;
+        }
+    }
+
+    let set = Signum::from_bits(*translated_refmut(token, set)).unwrap();
+
+    for serial in 1..MAX_SIG {
+        if set.contains(Signum::from_serial(serial).unwrap()) {
+            if let Some(info) = info {
+                info.signo = serial as i32;
+                // TODO si_code
+                // TODO si_value
+            }
+            return serial as isize;
+        }
+    }
+
+    -1
 }
 
 pub fn sys_sigreturn() -> isize {

@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::cmp::max;
 use lazy_static::*;
 
-use crate::timer::get_time_us;
+use crate::timer::{get_time_us, NSEC_PER_SEC};
 use crate::{
     config::CLOCK_FREQ,
     sync::UPIntrFreeCell,
@@ -15,6 +15,12 @@ use super::{pid2process, Signum};
 pub struct TimeVal {
     pub tv_sec: usize,
     pub tv_usec: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct TimeSpec {
+    pub tv_sec: usize,
+    pub tv_nsec: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -37,6 +43,23 @@ impl TimeVal {
 
     pub fn to_usec(&self) -> usize {
         self.tv_sec * USEC_PER_SEC + self.tv_usec
+    }
+}
+
+impl TimeSpec {
+    pub fn new() -> Self {
+        Self {
+            tv_sec: 0,
+            tv_nsec: 0,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.tv_sec == 0 && self.tv_nsec == 0
+    }
+
+    pub fn to_nsec(&self) -> usize {
+        self.tv_sec * NSEC_PER_SEC + self.tv_nsec
     }
 }
 

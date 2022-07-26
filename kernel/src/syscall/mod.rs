@@ -58,6 +58,7 @@ const SYSCALL_CONDVAR_WAIT: usize = 1032;
 
 const SYSCALL_SIGACTION: usize = 134;
 const SYSCALL_SIGPROCMASK: usize = 135;
+const SYSCALL_SIGTIMEDWAIT: usize = 137;
 const SYSCALL_SIGRETURN: usize = 139;
 const SYSCALL_GETITIMER: usize = 102;
 const SYSCALL_SETITIMER: usize = 103;
@@ -91,7 +92,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     //}
-    
+
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -125,6 +126,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_SIGACTION => sys_sigaction(args[0], args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as *mut u32, args[2] as *mut u32),
+        SYSCALL_SIGTIMEDWAIT => sys_sigtimedwait(args[0] as *mut u32, args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),

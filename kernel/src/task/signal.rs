@@ -5,17 +5,14 @@ use bitflags::*;
 
 pub const MAX_SIG: usize = 31;
 
-pub struct SignalStruct {
-    pub actions: [Option<SigAction>; MAX_SIG + 1],
-}
+// sigprocmask how
+pub const SIG_BLOCK: usize = 0;
+pub const SIG_UNBLOCK: usize = 1;
+pub const SIG_SETMASK: usize = 2;
 
-impl Default for SignalStruct {
-    fn default() -> Self {
-        Self {
-            actions: [None; MAX_SIG + 1],
-        }
-    }
-}
+// sigaction sa_handler
+pub const SIG_DFL: usize = 0; /* Default action.  */
+pub const SIG_IGN: usize = 1; /* Ignore signal.  */
 
 bitflags! {
     pub struct Signum: u32 {
@@ -52,6 +49,32 @@ bitflags! {
         const SIGIO = 1 << 29;
         const SIGPWR = 1 << 30;
         const SIGSYS = 1 << 31;
+    }
+}
+
+bitflags! {
+    /* Bits in `sa_flags'.  */
+    pub struct SaFlags: usize {
+        const SA_NOCLDSTOP = 1;     /* Don't send SIGCHLD when children stop.  */
+        const SA_NOCLDWAIT = 2;     /* Don't create zombie on child death.  */
+        const SA_SIGINFO   = 4;     /* Invoke signal-catching function with three arguments instead of one.  */
+        const SA_ONSTACK   = 0x08000000;    /* Use signal stack by using `sa_restorer'. */
+        const SA_RESTART   = 0x10000000;    /* Restart syscall on signal return.  */
+        const SA_NODEFER   = 0x40000000;    /* Don't automatically block the signal when its handler is being executed.  */
+        const SA_RESETHAND = 0x80000000;    /* Reset to SIG_DFL on entry to handler.  */
+        const SA_INTERRUPT = 0x20000000;    /* Historical no-op.  */
+    }
+}
+
+pub struct SignalStruct {
+    pub actions: [Option<SigAction>; MAX_SIG + 1],
+}
+
+impl Default for SignalStruct {
+    fn default() -> Self {
+        Self {
+            actions: [None; MAX_SIG + 1],
+        }
     }
 }
 
@@ -101,19 +124,29 @@ impl Signum {
 //     sa_sigaction(fn(isize, SigInfo, *mut SigInfo)),
 // }
 
-pub struct SigInfo {}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct SigInfo {
+    pub signo: i32,
+    pub errno: i32,
+    pub code: i32,
+}
 
-bitflags! {
-    /* Bits in `sa_flags'.  */
-    pub struct SaFlags: usize {
-        const SA_NOCLDSTOP = 1;     /* Don't send SIGCHLD when children stop.  */
-        const SA_NOCLDWAIT = 2;     /* Don't create zombie on child death.  */
-        const SA_SIGINFO   = 4;     /* Invoke signal-catching function with three arguments instead of one.  */
-        const SA_ONSTACK   = 0x08000000;    /* Use signal stack by using `sa_restorer'. */
-        const SA_RESTART   = 0x10000000;    /* Restart syscall on signal return.  */
-        const SA_NODEFER   = 0x40000000;    /* Don't automatically block the signal when its handler is being executed.  */
-        const SA_RESETHAND = 0x80000000;    /* Reset to SIG_DFL on entry to handler.  */
-        const SA_INTERRUPT = 0x20000000;    /* Historical no-op.  */
+const SIGINFO_PAD_SIZE: usize =
+    128 - 2 * core::mem::size_of::<i32>() - core::mem::size_of::<usize>();
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union SiginfoFields {
+    pad: [u8; SIGINFO_PAD_SIZE],
+    // TODO: fill this union
+}
+
+impl Default for SiginfoFields {
+    fn default() -> Self {
+        SiginfoFields {
+            pad: [0; SIGINFO_PAD_SIZE],
+        }
     }
 }
 
@@ -122,9 +155,6 @@ impl Default for SaFlags {
         Self::empty()
     }
 }
-
-pub const SIG_DFL: usize = 0; /* Default action.  */
-pub const SIG_IGN: usize = 1; /* Ignore signal.  */
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]

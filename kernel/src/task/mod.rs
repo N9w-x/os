@@ -6,7 +6,7 @@ use lazy_static::*;
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use info::CloneFlag;
-pub use timer::{TimeVal, ITimerVal, ITIMER_MANAGER};
+pub use timer::{TimeVal, TimeSpec, ITimerVal, ITIMER_MANAGER};
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
 pub use processor::{

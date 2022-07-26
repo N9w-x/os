@@ -27,6 +27,10 @@ pub fn get_time_us() -> usize {
     time::read() / (CLOCK_FREQ / (USEC_PER_SEC / 10)) * 10 // 防止整除导致小数部分丢失
 }
 
+pub fn get_time_ns() -> usize {
+    time::read() / (CLOCK_FREQ / (NSEC_PER_SEC / 1000)) * 1000
+}
+
 pub fn set_next_trigger() {
     set_timer(get_time() + CLOCK_FREQ / TICKS_PER_SEC);
 }
