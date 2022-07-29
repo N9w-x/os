@@ -12,7 +12,7 @@ use xmas_elf::ElfFile;
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
-    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_ANONYMOUS,
+    MAP_ANONYMOUS, MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
 };
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
@@ -52,6 +52,43 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
+    pub fn set_mem_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+        const PROT_NONE: usize = 0;
+        const PROT_READ: usize = 1;
+        const PROT_WRITE: usize = 2;
+        const PROT_EXEC: usize = 4;
+        
+        let pte_res = self.set_pte_flags(vpn, flags);
+        let mut map_area_res = -1;
+        for area in &mut self.areas {
+            if area.vpn_range.contain(vpn) {
+                let mut map_perm = MapPermission::U;
+                if (flags & PROT_READ) != 0 {
+                    map_perm |= MapPermission::R
+                }
+                if flags & PROT_WRITE != 0 {
+                    map_perm |= MapPermission::W
+                }
+                if flags & PROT_EXEC != 0 {
+                    map_perm |= MapPermission::X
+                }
+                
+                area.map_perm = map_perm;
+                break;
+            }
+        }
+        
+        if map_area_res == -1 || pte_res == -1 {
+            -1
+        } else {
+            0
+        }
+    }
+    
+    fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+        self.page_table.set_pte_flags(vpn, flags)
+    }
+    
     pub fn new_bare() -> Self {
         Self {
             page_table: PageTable::new(),
@@ -192,21 +229,21 @@ impl MemorySet {
         }
         memory_set
     }
-    
+
     // 动态链接程序装载interpreter
     // (entry_point,base_va)
     fn map_interpreter(&mut self) -> (usize, usize) {
         let file = open_file("/", "libc.so", OpenFlags::RDWR, FileType::Regular).unwrap();
         let data = file.read_all();
-        
+    
         let ld_elf = ElfFile::new(&data).unwrap();
         let ld_header = ld_elf.header;
         let magic = ld_header.pt1.magic;
         assert_eq!(magic, [0x7f, 0x45, 0x4c, 0x46], "not valid elf");
-        
+    
         let mut head_va = 0usize;
-        let base = 0x2000_0000usize;
-        
+        let base = 0x2000_000usize;
+    
         for ph in ld_elf.program_iter() {
             if ph.get_type().unwrap() == xmas_elf::program::Type::Load {
                 let start_va = VirtAddr::from(ph.virtual_addr() as usize + base);
@@ -215,7 +252,7 @@ impl MemorySet {
                 if head_va == 0 {
                     head_va = start_va.0
                 }
-                
+
                 let perm = ph.flags();
                 let mut map_perm = MapPermission::U;
                 if perm.is_read() {
@@ -227,7 +264,7 @@ impl MemorySet {
                 if perm.is_execute() {
                     map_perm |= MapPermission::X
                 }
-                
+
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 self.push_with_offset(
                     map_area,
@@ -239,7 +276,7 @@ impl MemorySet {
                 )
             }
         }
-        
+
         (ld_header.pt2.entry_point() as usize + base, base)
     }
     
@@ -266,7 +303,7 @@ impl MemorySet {
             AuxHeader::new(AT_EGID, 0),
             AuxHeader::new(AT_PLATFORM, 0),
             AuxHeader::new(AT_HWCAP, 0),
-            AuxHeader::new(AT_CLKTCK, CLOCK_FREQ),
+            AuxHeader::new(AT_CLKTCK, 100usize),
             AuxHeader::new(AT_SECURE, 0),
             AuxHeader::new(AT_NOELF, 0x112d),
         ];
@@ -281,9 +318,12 @@ impl MemorySet {
                 let start_va: VirtAddr = (ph.virtual_addr() as usize).into();
                 let end_va: VirtAddr = ((ph.virtual_addr() + ph.mem_size()) as usize).into();
                 let offset = start_va.0 - start_va.floor().0 * PAGE_SIZE;
-
+    
                 let mut map_perm = MapPermission::U;
                 let ph_flags = ph.flags();
+                if head_va == 0 {
+                    head_va = start_va.0;
+                }
                 if ph_flags.is_read() {
                     map_perm |= MapPermission::R;
                 }
@@ -293,12 +333,11 @@ impl MemorySet {
                 if ph_flags.is_execute() {
                     map_perm |= MapPermission::X;
                 }
-    
+
                 let map_area = MapArea::new(start_va, end_va, MapType::Framed, map_perm);
                 max_end_vpn = map_area.vpn_range.get_end();
     
                 if offset == 0 {
-                    head_va = start_va.into();
                     memory_set.push(
                         map_area,
                         Some(
@@ -694,7 +733,7 @@ impl MemoryMapArea {
                         let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
                         let page_offset = va - mmap_base + self.offset;
                         let buf =
-                        translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+                            translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
                         inode.set_offset(page_offset);
                         inode.read(UserBuffer::new(buf));
                     }

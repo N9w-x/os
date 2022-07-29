@@ -52,6 +52,10 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         (self.flags() & PTEFlags::X) != PTEFlags::empty()
     }
+    
+    pub fn set_flags(&mut self, flags: usize) {
+        self.bits = (self.bits & !0b1110usize) | (flags & 0b1110usize);
+    }
 }
 
 pub struct PageTable {
@@ -68,6 +72,7 @@ impl PageTable {
             frames: vec![frame],
         }
     }
+
     /// Temporarily used to get arguments from user space.
     pub fn from_token(satp: usize) -> Self {
         Self {
@@ -75,6 +80,7 @@ impl PageTable {
             frames: Vec::new(),
         }
     }
+    
     fn find_pte_create(&mut self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
@@ -94,6 +100,7 @@ impl PageTable {
         }
         result
     }
+    
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
@@ -111,21 +118,42 @@ impl PageTable {
         }
         result
     }
+    
+    pub fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+        let idxs = vpn.indexes();
+        let mut ppn = self.root_ppn;
+        for i in 0..3 {
+            let pte = &mut ppn.get_pte_array()[idxs[i]];
+            if i == 2 {
+                pte.set_flags(flags);
+                break;
+            }
+            if !pte.is_valid() {
+                return -1;
+            }
+            ppn = pte.ppn();
+        }
+        0
+    }
+    
     #[allow(unused)]
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
     }
+    
     #[allow(unused)]
     pub fn unmap(&mut self, vpn: VirtPageNum) {
         let pte = self.find_pte(vpn).unwrap();
         assert!(pte.is_valid(), "vpn {:?} is invalid before unmapping", vpn);
         *pte = PageTableEntry::empty();
     }
+    
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.find_pte(vpn).map(|pte| *pte)
     }
+    
     pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
         self.find_pte(va.clone().floor()).map(|pte| {
             let aligned_pa: PhysAddr = pte.ppn().into();
@@ -134,6 +162,7 @@ impl PageTable {
             (aligned_pa_usize + offset).into()
         })
     }
+    
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }

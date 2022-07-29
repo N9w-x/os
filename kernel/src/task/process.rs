@@ -8,18 +8,18 @@ use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE};
 use crate::console::INFO;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
 use crate::mm::{
-    translated_ref, translated_refmut, AuxHeader, MapPermission, MemoryMapArea, MemorySet,
-    VirtAddr, VirtPageNum, KERNEL_SPACE,
+    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
+    translated_refmut, VirtAddr, VirtPageNum,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::task::SignalStruct;
 use crate::trap::{trap_handler, TrapContext};
 
+use super::{add_task, ITimerVal, Signum};
+use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
-use super::{add_task, Signum, ITimerVal};
-use super::{pid_alloc, PidHandle};
 
 pub struct ProcessControlBlock {
     // immutable
@@ -136,10 +136,14 @@ impl ProcessControlBlockInner {
 }
 
 impl ProcessControlBlock {
+    pub fn is_locked(&self) -> bool {
+        self.inner.is_locked()
+    }
+    
     pub fn inner_exclusive_access(&self) -> UPIntrRefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
     }
-
+    
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
@@ -243,6 +247,7 @@ impl ProcessControlBlock {
             String::from("_=busybox"),
             String::from("LOGNAME=root"),
             String::from("HOME=/"),
+            String::from("LD_LIBRARY_PATH=/"),
             String::from("PATH=/"),
         ];
 

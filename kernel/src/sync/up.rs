@@ -119,6 +119,10 @@ impl<T> UPIntrFreeCell<T> {
         let mut inner = self.exclusive_access();
         f(inner.deref_mut())
     }
+    
+    pub fn is_locked(&self) -> bool {
+        self.inner.try_borrow_mut().is_err()
+    }
 }
 
 impl<'a, T> Drop for UPIntrRefMut<'a, T> {

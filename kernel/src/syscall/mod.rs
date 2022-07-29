@@ -75,6 +75,8 @@ const SYSCALL_SIG_PROC_MASK: usize = 135;
 
 const SYSCALL_PRLIMIT64: usize = 261;
 const SYSCALL_LSEEK: usize = 62;
+const SYSCALL_IOCTL: usize = 29;
+const SYSCALL_FCNTL: usize = 25;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_WRITEV, 66);
@@ -90,11 +92,11 @@ mod thread;
 mod utils;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
-    //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
-    //}
-    // println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
-
+    if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
+        println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
+    }
+    //println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
+    
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -128,7 +130,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_SIGACTION => sys_sigaction(args[0], args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as *mut u32, args[2] as *mut u32),
-        SYSCALL_SIGTIMEDWAIT => sys_sigtimedwait(args[0] as *mut u32, args[1] as *mut usize, args[2] as *mut usize),
+        //SYSCALL_SIGTIMEDWAIT => sys_sigtimedwait(args[0] as *mut u32, args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
@@ -152,7 +154,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2], args[3], args[4], args[5]),
         SYSCALL_TIMES => sys_get_times(args[0] as *mut u64),
         SYSCALL_UNAME => sys_uname(args[0] as *mut u8),
-        SYSCALL_MPROTECT => unimplemented!(),
+        SYSCALL_MPROTECT => sys_mprotect(args[0], args[1], args[2] as isize),
         SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
         SYSCALL_GET_UID => sys_get_uid(),
         SYSCALL_NEW_FSTATAT => sys_new_fstatat(
@@ -171,6 +173,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         }
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_LSEEK => sys_lseek(args[0] as isize, args[1] as isize, args[2] as i32),
+        SYSCALL_FCNTL => sys_fcntl(args[0], args[1] as u32, args[2] as _),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {

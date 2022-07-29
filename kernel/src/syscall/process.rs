@@ -5,16 +5,17 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 
 use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE};
-use crate::console::INFO;
+use crate::console::{ERROR, INFO, WARNING};
 use crate::fs_fat::{FileType, open_file, OpenFlags};
 use crate::mm::{
-    align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
+    align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str,
+    UserBuffer, VirtPageNum,
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
-    pid2process, suspend_current_and_run_next, CloneFlag, ITimerVal, SigAction, SigInfo, Signum,
-    TimeSpec, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK,
+    add_task, CloneFlag, current_process, current_task, current_user_token,
+    exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, MAX_SIG, pid2process, SIG_BLOCK, SIG_SETMASK,
+    SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, TimeSpec,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use crate::trap::lazy_check;
@@ -83,13 +84,23 @@ pub fn sys_fork() -> isize {
     new_pid as isize
 }
 
-pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: usize) -> isize {
+pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, ctid: usize, tls: usize) -> isize {
     let pcb = current_process();
     let flags = unsafe { CloneFlag::from_bits_unchecked(flags) };
     let child_pcb = pcb.fork();
     let mut child_inner = child_pcb.inner_exclusive_access();
     let child_pid = child_pcb.getpid();
-
+    let parent_pid = pcb.getpid();
+    println!(
+        "{}",
+        color!(
+            format!(
+                "[fork] parent pid: {}, child pid: {}",
+                parent_pid, child_pid
+            ),
+            INFO
+        )
+    );
     if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         return -1;
     }
@@ -139,10 +150,15 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     ) {
         let all_data = app_inode.read_all();
         let process = current_process();
+        let pid = process.getpid();
+        println!(
+            "{}",
+            color!(format!("[exec] pid: {}, name: {}", pid, path), INFO)
+        );
         let argc = args_vec.len();
         process.exec(all_data.as_slice(), args_vec);
         // return argc because cx.x[10] will be covered with it later
-        argc as isize
+        0
     } else {
         -1
     }
@@ -152,41 +168,86 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
 /// Else if there is a child process but it is still running, return -2.
 pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     loop {
-        let process = current_process();
-        // find a child process
-
-        let mut inner = process.inner_exclusive_access();
-        if !inner
-            .children
-            .iter()
-            .any(|p| pid == -1 || pid as usize == p.getpid())
+        let mut found = true;
+        let mut exited = true;
         {
-            return -1;
-            // ---- release current PCB
-        }
-        let pair = inner.children.iter().enumerate().find(|(_, p)| {
-            // ++++ temporarily access child PCB exclusively
-            p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
-            // ++++ release child PCB
-        });
-        if let Some((idx, _)) = pair {
-            let child = inner.children.remove(idx);
-            // confirm that child will be deallocated after being removed from children list
-            assert_eq!(Arc::strong_count(&child), 1);
-            let found_pid = child.getpid();
-            // ++++ temporarily access child PCB exclusively
-            let exit_code = child.inner_exclusive_access().exit_code;
-            // ++++ release child PCB
-            if (exit_code_ptr as usize) != 0 {
-                *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code << 8;
-                //不太清楚为什么需要左移8位
+            let process = current_process();
+            let mut inner = process.inner_exclusive_access();
+            let token = inner.get_user_token();
+        
+            if !inner
+                .children
+                .iter()
+                .any(|p| pid == -1 || pid as usize == p.getpid())
+            {
+                found = false;
+                // ---- release current PCB
             }
-            return found_pid as isize;
-        } else {
-            drop(inner);
-            drop(process);
-            suspend_current_and_run_next();
+        
+            if found {
+                let pair = inner.children.iter().enumerate().find(|(_, p)| {
+                    println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
+                    let child_pid = p.getpid();
+                    let inner = p.inner_exclusive_access();
+                    let flag = inner.is_zombie && (pid == -1 || pid as usize == child_pid);
+                    drop(inner);
+                    flag
+                });
+            
+                if let Some((idx, _)) = pair {
+                    let child = inner.children.remove(idx);
+                    assert_eq!(Arc::strong_count(&child), 1);
+                    let found_pid = child.getpid();
+                    let exit_code = child.inner_exclusive_access().exit_code;
+                
+                    if exit_code_ptr as usize != 0 {
+                        *translated_refmut(token, exit_code_ptr) = (exit_code & 0xff) << 8;
+                    }
+                    return found_pid as isize;
+                } else {
+                    exited = false
+                }
+            }
         }
+        assert!(!found || !exited);
+        suspend_current_and_run_next();
+    
+        //let process = current_process();
+        //// find a child process
+        //
+        //let mut inner = process.inner_exclusive_access();
+        //if !inner
+        //    .children
+        //    .iter()
+        //    .any(|p| pid == -1 || pid as usize == p.getpid())
+        //{
+        //    return -1;
+        //    // ---- release current PCB
+        //}
+        //let pair = inner.children.iter().enumerate().find(|(_, p)| {
+        //    // ++++ temporarily access child PCB exclusively
+        //    let child_pid = p.getpid();
+        //    p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == child_pid)
+        //    // ++++ release child PCB
+        //});
+        //if let Some((idx, _)) = pair {
+        //    let child = inner.children.remove(idx);
+        //    // confirm that child will be deallocated after being removed from children list
+        //    assert_eq!(Arc::strong_count(&child), 1);
+        //    let found_pid = child.getpid();
+        //    // ++++ temporarily access child PCB exclusively
+        //    let exit_code = child.inner_exclusive_access().exit_code;
+        //    // ++++ release child PCB
+        //    if (exit_code_ptr as usize) != 0 {
+        //        *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code << 8;
+        //        //不太清楚为什么需要左移8位
+        //    }
+        //    return found_pid as isize;
+        //} else {
+        //    drop(inner);
+        //    drop(process);
+        //    suspend_current_and_run_next();
+        //}
     }
     // ---- release current PCB automatically
 }
@@ -225,7 +286,7 @@ pub fn sys_brk(addr: usize) -> isize {
             lazy_check(old_end);
             old_end += PAGE_SIZE;
         }
-        
+
         addr as isize
     }
 }
@@ -249,14 +310,7 @@ pub fn sys_mmap(
     } else {
         fd
     };
-    inner.mmap(
-        align_start,
-        align_len,
-        prot,
-        flags,
-        adjust_fd,
-        offset,
-    );
+    inner.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
 
     // remove lazy
     drop(inner);
@@ -495,4 +549,23 @@ pub fn sys_clock_gettime(clk_id: isize, tp: *mut usize) -> isize {
     } else {
         -1
     }
+}
+
+pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
+    if addr % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
+        return -1;
+    }
+    
+    let pcb = current_process();
+    let memory_set = &mut pcb.inner_exclusive_access().memory_set;
+    
+    let start_vpn = addr / PAGE_SIZE;
+    for i in 0..(len / PAGE_SIZE) {
+        let vpn = start_vpn + i;
+        if memory_set.set_mem_flags(VirtPageNum::from(vpn), prot as usize) == -1 {
+            return -1;
+        }
+    }
+    
+    0
 }

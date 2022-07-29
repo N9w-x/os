@@ -1,3 +1,4 @@
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -6,6 +7,7 @@ use core::iter::FromIterator;
 use fat32::DIRENT_SZ;
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 
+use crate::console::INFO;
 use crate::fs_fat::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
     open_file, OpenFlags, OSInode, WorkPath,
@@ -59,6 +61,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     let process = current_process();
     let token = current_user_token();
     let path = translated_str(token, path);
+    println!("{}", color!(format!("[open] path:{}", path), INFO));
     //rcore-tutorial和ultra os 你们可上点心吧
     let flags = unsafe { OpenFlags::from_bits_unchecked(flags) };
     //获取要打开文件的inode
@@ -314,7 +317,7 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
     let pcb = current_process();
-    
+
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDWR, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -323,11 +326,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     } else {
         let fd_usize = fd as usize;
         let mut inner = pcb.inner_exclusive_access();
-        
+    
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-        
+    
         match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
             _ => return -1,
@@ -444,5 +447,33 @@ pub fn sys_lseek(fd: isize, offset: isize, whence: i32) -> isize {
     match &inner.fd_table[fd as usize] {
         Some(FileDescriptor::Regular(os_inode)) => os_inode.lseek(offset, whence),
         _ => -1,
+    }
+}
+
+pub fn sys_fcntl(fd: usize, cmd: u32, arg: usize) -> isize {
+    const F_DUPFD: u32 = 0;
+    const F_GETFD: u32 = 1;
+    const F_SETFD: u32 = 2;
+    const F_DUPFD_CLOEXEC: u32 = 1030;
+    
+    let pcb = current_process();
+    let mut inner = pcb.inner_exclusive_access();
+    
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    
+    if let Some(fd_) = &mut inner.fd_table[fd] {
+        match cmd {
+            F_DUPFD_CLOEXEC | F_DUPFD => {
+                let new_fd = inner.alloc_fd();
+                inner.fd_table[new_fd] = inner.fd_table[fd].clone();
+                new_fd as isize
+            }
+            F_GETFD | F_SETFD => 0,
+            _ => 0,
+        }
+    } else {
+        -1
     }
 }
