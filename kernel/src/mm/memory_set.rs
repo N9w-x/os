@@ -492,7 +492,7 @@ impl MemorySet {
     pub fn lazy_alloc_mmap_area(
         &mut self,
         va: VirtAddr,
-        fd_table: Vec<Option<FileDescriptor>>,
+        // fd_table: Vec<Option<FileDescriptor>>,
     ) -> bool {
         let vpn: VirtPageNum = va.floor();
 
@@ -507,7 +507,8 @@ impl MemorySet {
             .iter_mut()
             .find(|area| area.vpn_range.contain(vpn))
         {
-            return area.map_one(&mut self.page_table, vpn, fd_table);
+            // return area.map_one(&mut self.page_table, vpn, fd_table);
+            return area.map_one(&mut self.page_table, vpn);
         }
         false
     }
@@ -710,11 +711,13 @@ impl MemoryMapArea {
         }
     }
     
+    /// 只分配内存, 不映射文件
+    /// 一次只分配一页
     pub fn map_one(
         &mut self,
         page_table: &mut PageTable,
         vpn: VirtPageNum,
-        fd_table: Vec<Option<FileDescriptor>>,
+        // fd_table: Vec<Option<FileDescriptor>>,
     ) -> bool {
         // 分配物理页
         let ppn: PhysPageNum;
@@ -723,24 +726,25 @@ impl MemoryMapArea {
         self.data_frames.insert(vpn, frame);
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
+        println!("mmap vpn: {:#X} -> ppn: {:#X}, {:#}", vpn.0, ppn.0, self.map_perm);
         
-        // 复制文件数据到内存
-        if let Some(file_descriptor) = &fd_table[self.fd] {
-            match file_descriptor {
-                FileDescriptor::Regular(inode) => {
-                    if inode.readable() {
-                        let va: usize = VirtAddr::from(vpn).into();
-                        let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
-                        let page_offset = va - mmap_base + self.offset;
-                        let buf =
-                            translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
-                        inode.set_offset(page_offset);
-                        inode.read(UserBuffer::new(buf));
-                    }
-                }
-                FileDescriptor::Abstract(_) => todo!(),
-            };
-        }
+        // // 复制文件数据到内存
+        // if let Some(file_descriptor) = &fd_table[self.fd] {
+        //     match file_descriptor {
+        //         FileDescriptor::Regular(inode) => {
+        //             if inode.readable() {
+        //                 let va: usize = VirtAddr::from(vpn).into();
+        //                 let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
+        //                 let page_offset = va - mmap_base + self.offset;
+        //                 let buf =
+        //                     translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+        //                 inode.set_offset(page_offset);
+        //                 inode.read(UserBuffer::new(buf));
+        //             }
+        //         }
+        //         FileDescriptor::Abstract(_) => todo!(),
+        //     };
+        // }
         return true;
     }
     

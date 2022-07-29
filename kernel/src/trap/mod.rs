@@ -115,7 +115,7 @@ pub fn trap_handler() -> ! {
             //
             //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
             //}
-            if !lazy_check(stval) {
+            // if !lazy_check(stval) {
                 println!(
                     "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
                     scause.cause(),
@@ -123,7 +123,7 @@ pub fn trap_handler() -> ! {
                     current_trap_cx().sepc
                 );
                 current_add_signal(Signum::SIGSEGV);
-            }
+            // }
             unsafe {
                 asm!("sfence.vma");
                 asm!("fence.i");

@@ -6,10 +6,10 @@ use core::mem::size_of;
 
 use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE};
 use crate::console::{ERROR, INFO, WARNING};
-use crate::fs_fat::{FileType, open_file, OpenFlags};
+use crate::fs_fat::{FileType, open_file, OpenFlags, FileDescriptor, File};
 use crate::mm::{
     align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str,
-    UserBuffer, VirtPageNum,
+    UserBuffer, VirtPageNum, VirtAddr,
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
@@ -278,12 +278,11 @@ pub fn sys_brk(addr: usize) -> isize {
         inner.heap_end = align_end.into();
 
         // remove lazy
-        drop(inner);
         loop {
             if old_end >= align_end {
                 break;
             }
-            lazy_check(old_end);
+            inner.memory_set.lazy_alloc_heap(VirtAddr::from(old_end));
             old_end += PAGE_SIZE;
         }
 
@@ -299,6 +298,7 @@ pub fn sys_mmap(
     fd: usize,
     offset: usize,
 ) -> isize {
+    let token = current_user_token();
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let align_start = align_up(inner.mmap_area_end.0);
@@ -311,15 +311,33 @@ pub fn sys_mmap(
         fd
     };
     inner.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
-
     // remove lazy
-    drop(inner);
     let mut addr = align_start;
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
     loop {
         if addr >= align_start + align_len {
             break;
         }
-        lazy_check(addr);
+        // 分配内存 (一次分配一页)
+        let mut inner = process.inner_exclusive_access();
+        inner.memory_set.lazy_alloc_mmap_area(VirtAddr::from(addr));
+        drop(inner);
+        // 映射文件
+        if let Some(file_descriptor) = &fd_table[adjust_fd] {
+            match file_descriptor {
+                FileDescriptor::Regular(inode) => {
+                    if inode.readable() {
+                        let mmap_base = align_start;
+                        let page_offset = addr - mmap_base + offset;
+                        let buf = translated_byte_buffer(token, addr as *const u8, PAGE_SIZE);
+                        inode.set_offset(page_offset);
+                        inode.read(UserBuffer::new(buf));
+                    }
+                }
+                FileDescriptor::Abstract(_) => todo!(),
+            }
+        }
         addr += PAGE_SIZE;
     }
 
