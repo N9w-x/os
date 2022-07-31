@@ -3,6 +3,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::iter::FromIterator;
+use core::mem::size_of;
 
 use fat32::DIRENT_SZ;
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
@@ -16,6 +17,8 @@ use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
 use crate::task::{current_process, current_task, current_user_token};
+
+use super::errno::{EPERM, EMFILE};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
@@ -61,7 +64,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     let process = current_process();
     let token = current_user_token();
     let path = translated_str(token, path);
-    println!("{}", color!(format!("[open] path:{}", path), INFO));
+    // println!("{}", color!(format!("[open] path:{}", path), INFO));
     //rcore-tutorial和ultra os 你们可上点心吧
     let flags = unsafe { OpenFlags::from_bits_unchecked(flags) };
     //获取要打开文件的inode
@@ -75,7 +78,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
         let inner = process.inner_exclusive_access();
         let fd_usize = fd as usize;
         if fd_usize >= inner.fd_table.len() {
-            return -1;
+            return -EPERM;
         }
         //todo rcore tutorial使用的锁和spin::mutex冲突了..
         let res = inner.fd_table[fd_usize].clone();
@@ -88,12 +91,10 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
                     os_inode.find(&path, flags)
                 }
             }
-            _ => {
-                return -1;
-            }
+            _ => return -1,
         }
     } {
-        None => -1,
+        None => -EMFILE,
         Some(os_inode) => {
             //alloc fd and push into fd table
             let mut inner = process.inner_exclusive_access();
@@ -132,7 +133,10 @@ pub fn sys_dup(fd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() || inner.fd_table[fd].is_none() {
-        return -1;
+        return -EPERM;
+    }
+    if inner.fd_table.len() > inner.fd_max {
+        return -EMFILE;
     }
     let new_fd = inner.alloc_fd();
     inner.fd_table[new_fd] = Some(inner.fd_table[fd].as_ref().unwrap().clone());
@@ -209,13 +213,11 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
 pub fn sys_dup3(old_fd: usize, new_fd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
-    if old_fd >= inner.fd_table.len()
-        || inner.fd_table[old_fd].is_none()
-        || old_fd == new_fd
-        || new_fd >= 128
-    {
-        // TODO: 128 is FD_MAX
-        return -1;
+    if old_fd >= inner.fd_table.len() || inner.fd_table[old_fd].is_none() {
+        return -EPERM;
+    }
+    if old_fd > inner.fd_max {
+        return -EMFILE;
     }
     // alloc a specific new_fd
     inner.alloc_specific_fd(new_fd);
@@ -475,5 +477,54 @@ pub fn sys_fcntl(fd: usize, cmd: u32, arg: usize) -> isize {
         }
     } else {
         -1
+    }
+}
+
+pub fn sys_statfs(_path: *const u8, buf: *const u8) -> isize {
+    let token = current_user_token();
+    let buf_vec = translated_byte_buffer(token, buf, size_of::<Statfs>());
+    let mut userbuf = UserBuffer::new(buf_vec);
+    let statfs = Statfs::new();
+    userbuf.write(statfs.as_bytes());
+    0
+}
+
+#[repr(C)]
+pub struct Statfs {
+    f_type: i64,        // Type of filesystem
+    f_bsize: i64,       // Optimal transfer block size
+    f_blocks: i64,      // Total data blocks in filesystem
+    f_bfree: i64,       // Free blocks in filesystem
+    f_bavail: i64,      // Free blocks available to unprivileged user
+    f_files: i64,       // Total inodes in filesystem
+    f_ffree: i64,       // Free inodes in filesystem
+    f_fsid: i64,        // Filesystem ID
+    f_name_len: i64,    // Maximum length of filenames
+    f_frsize: i64,      // Fragment size
+    f_flags: i64,       // Mount flags of filesystem
+    f_spare: [i64; 4],  // Padding bytes
+}
+
+impl Statfs {
+    pub fn new() -> Self {
+        Self {
+            f_type: 0x4006,
+            f_bsize: 512,
+            f_blocks: 1048576,
+            f_bfree: 1048576,
+            f_bavail: 0,
+            f_files: 131072,
+            f_ffree: 131072,
+            f_fsid: 0,
+            f_name_len: 255,
+            f_frsize: 0,
+            f_flags: 0,
+            f_spare: [0; 4],
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        let size = core::mem::size_of::<Self>();
+        unsafe { core::slice::from_raw_parts(self as *const _ as usize as *mut u8, size) }
     }
 }

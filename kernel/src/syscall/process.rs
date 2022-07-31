@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED};
+use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED, FD_MAX, RLIMIT_FSIZE};
 use crate::console::{ERROR, INFO, WARNING};
 use crate::fs_fat::{FileType, open_file, OpenFlags, FileDescriptor, File};
 use crate::mm::{
@@ -559,4 +559,36 @@ pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
     }
     
     0
+}
+
+
+#[derive(Clone, Copy, Debug)]
+pub struct RLimit64 {
+	pub rlim_cur: usize ,
+	pub rlim_max: usize ,
+}
+
+pub fn sys_prlimit(pid: usize, resource: usize, rlimit: *const RLimit64, old_rlimit: *mut RLimit64) -> isize {
+    let token = current_user_token();
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    match resource {
+        RLIMIT_NOFILE => {
+            // 仅仅记录值到inner.fd_max
+            if old_rlimit as usize != 0 && inner.fd_max != FD_MAX {
+                let _old_rlimit = translated_refmut(token, old_rlimit);
+                _old_rlimit.rlim_cur = inner.fd_max + 1;
+                _old_rlimit.rlim_max = inner.fd_max + 1;
+            }
+            if rlimit as usize != 0 {
+                let _rlimit = translated_ref(token, rlimit);
+                inner.fd_max = _rlimit.rlim_max - 1;
+            }
+            0
+        }
+        _ => {
+            // println!("{}", color!(format!("sys_prlimit() unsupport resource:{}", resource), WARNING));
+            0
+        }
+    }
 }

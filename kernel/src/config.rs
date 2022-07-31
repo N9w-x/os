@@ -16,6 +16,8 @@ pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 pub const USER_STACK_BASE: usize = 0x1_0000_0000;
 pub const MEMORY_MAP_BASE: usize = 0x8000_0000;
 
+pub const FD_MAX: usize = 128;
+
 #[macro_export]
 macro_rules! const_def {
     ($ident:ident, $val:expr) => {
@@ -70,3 +72,22 @@ const_def!(AT_HWCAP2, 26);
 const_def!(AT_EXECFN, 31);
 const_def!(AT_SYSINFO, 32);
 const_def!(AT_SYSINFO_EHDR, 33);
+
+
+const_def!(RLIMIT_CPU, 0);
+const_def!(RLIMIT_FSIZE, 1);
+const_def!(RLIMIT_DATA, 2);
+const_def!(RLIMIT_STACK, 3);
+const_def!(RLIMIT_CORE, 4);
+const_def!(RLIMIT_RSS, 5);
+const_def!(RLIMIT_NPROC, 6);
+const_def!(RLIMIT_NOFILE, 7);
+const_def!(RLIMIT_MEMLOCK, 8);
+const_def!(RLIMIT_AS, 9);
+const_def!(RLIMIT_LOCKS, 10);
+const_def!(RLIMIT_SIGPENDING, 11);
+const_def!(RLIMIT_MSGQUEUE, 12);
+const_def!(RLIMIT_NICE, 13);
+const_def!(RLIMIT_RTPRIO, 14);
+const_def!(RLIMIT_RTTIME, 15);
+const_def!(RLIM_NLIMITS, 16);

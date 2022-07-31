@@ -4,7 +4,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE, MAP_FIXED, PAGE_SIZE};
+use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE, MAP_FIXED, PAGE_SIZE, FD_MAX};
 use crate::console::INFO;
 use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
 use crate::mm::{
@@ -40,6 +40,7 @@ pub struct ProcessControlBlockInner {
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<FileDescriptor>>,
+    pub fd_max: usize,
     /// 待响应信号
     pub signals: Signum,
     /// 正在响应的信号
@@ -142,6 +143,7 @@ impl ProcessControlBlock {
                         // 2 -> stderr
                         Some(FileDescriptor::Abstract(Arc::new(Stdout))),
                     ],
+                    fd_max: FD_MAX,
                     signals: Signum::empty(),
                     signal_handling: 0,
                     signal_masks: Signum::empty(),
@@ -398,6 +400,7 @@ impl ProcessControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    fd_max: FD_MAX,
                     signals: Signum::empty(),
                     signal_handling: 0,
                     signal_masks: Signum::empty(),

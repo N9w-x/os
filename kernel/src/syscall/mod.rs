@@ -5,6 +5,8 @@ use process::*;
 use sync::*;
 use thread::*;
 use utils::*;
+use errno::*;
+use net::*;
 
 use crate::console::{ERROR, INFO};
 use crate::const_def;
@@ -63,6 +65,10 @@ const SYSCALL_SIGRETURN: usize = 139;
 const SYSCALL_GETITIMER: usize = 102;
 const SYSCALL_SETITIMER: usize = 103;
 const SYSCALL_CLOCK_GETTIME: usize = 113;
+const SYSCALL_PRLIMIT64: usize = 261;
+const SYSCALL_SENDTO: usize = 206;
+const SYSCALL_RECVFROM: usize = 207;
+const SYSCALL_STATFS: usize = 43;
 
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
@@ -73,7 +79,6 @@ const SYSCALL_NEW_FSTATAT: usize = 79;
 const SYSCALL_SIG_ACTION: usize = 134;
 const SYSCALL_SIG_PROC_MASK: usize = 135;
 
-const SYSCALL_PRLIMIT64: usize = 261;
 const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FCNTL: usize = 25;
@@ -90,12 +95,13 @@ mod process;
 mod sync;
 mod thread;
 mod utils;
+mod errno;
+mod net;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
         println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     }
-    //println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
@@ -165,15 +171,30 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         ),
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
-        SYSCALL_PRLIMIT64 => 0,
+        SYSCALL_PRLIMIT64 => sys_prlimit(args[0], args[1], args[2] as *const RLimit64, args[3] as *mut RLimit64),
         //SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as usize),
-        SYSCALL_SETITIMER => {
-            sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize)
-        }
+        SYSCALL_SETITIMER => sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize),
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_LSEEK => sys_lseek(args[0] as isize, args[1] as isize, args[2] as i32),
         SYSCALL_FCNTL => sys_fcntl(args[0], args[1] as u32, args[2] as _),
+        SYSCALL_SENDTO => sys_sendto(
+            args[0] as isize,
+            args[1] as *const u8,
+            args[2],
+            args[3] as isize,
+            args[4],
+            args[5],
+        ),
+        SYSCALL_RECVFROM => sys_recvfrom(
+            args[0] as isize,
+            args[1] as *const u8,
+            args[2],
+            args[3] as isize,
+            args[4],
+            args[5],
+        ),
+        SYSCALL_STATFS => sys_statfs(args[0] as _, args[1] as _),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {

@@ -11,7 +11,7 @@ pub use inode::{ch_dir, list_apps, open_file};
 pub use inode::{FileType, OpenFlags, OSInode};
 pub use io_vec::IOVec;
 pub use path::WorkPath;
-pub use pipe::{make_pipe, Pipe};
+pub use pipe::{make_pipe, Pipe, PipeRingBuffer};
 pub use stdio::{Stdin, Stdout};
 
 use crate::fs_fat::inode::ROOT_INODE;
