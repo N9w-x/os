@@ -1,5 +1,5 @@
 pub use address::{align_up, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
-use address::VPNRange;
+pub use address::VPNRange;
 pub use frame_allocator::{add_free, frame_alloc, frame_dealloc, FrameTracker};
 pub use heap_allocator::get_rest;
 pub use memory_set::{AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet};

@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE};
+use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED};
 use crate::console::{ERROR, INFO, WARNING};
 use crate::fs_fat::{FileType, open_file, OpenFlags, FileDescriptor, File};
 use crate::mm::{
@@ -186,7 +186,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         
             if found {
                 let pair = inner.children.iter().enumerate().find(|(_, p)| {
-                    println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
+                    // println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
                     let child_pid = p.getpid();
                     let inner = p.inner_exclusive_access();
                     let flag = inner.is_zombie && (pid == -1 || pid as usize == child_pid);
@@ -301,7 +301,11 @@ pub fn sys_mmap(
     let token = current_user_token();
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
-    let align_start = align_up(inner.mmap_area_end.0);
+    let align_start = if start != 0 && flags & MAP_FIXED != 0 {
+        align_up(start)
+    } else {
+        align_up(inner.mmap_area_end.0)
+    };
     let align_len = align_up(len);
     let adjust_fd = if fd as isize == -1 {
         inner.alloc_fd()
@@ -310,46 +314,15 @@ pub fn sys_mmap(
     } else {
         fd
     };
-    inner.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
-    // remove lazy
-    let mut addr = align_start;
-    let fd_table = inner.fd_table.clone();
+    println!("[mmap] start: {:#X}, len: {:#X}, flag: {:#X}", align_start, align_len, flags);
     drop(inner);
-    loop {
-        if addr >= align_start + align_len {
-            break;
-        }
-        // 分配内存 (一次分配一页)
-        let mut inner = process.inner_exclusive_access();
-        inner.memory_set.lazy_alloc_mmap_area(VirtAddr::from(addr));
-        drop(inner);
-        // 映射文件
-        if let Some(file_descriptor) = &fd_table[adjust_fd] {
-            match file_descriptor {
-                FileDescriptor::Regular(inode) => {
-                    if inode.readable() {
-                        let mmap_base = align_start;
-                        let page_offset = addr - mmap_base + offset;
-                        let buf = translated_byte_buffer(token, addr as *const u8, PAGE_SIZE);
-                        inode.set_offset(page_offset);
-                        inode.read(UserBuffer::new(buf));
-                    }
-                }
-                FileDescriptor::Abstract(_) => todo!(),
-            }
-        }
-        addr += PAGE_SIZE;
-    }
-
+    process.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
     align_start as isize
 }
 
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     let align_start = align_up(start);
-    if current_process()
-        .inner_exclusive_access()
-        .munmap(align_start, len)
-    {
+    if current_process().munmap(align_start, len) {
         0
     } else {
         -1

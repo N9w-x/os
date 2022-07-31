@@ -12,8 +12,9 @@ use xmas_elf::ElfFile;
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
-    MAP_ANONYMOUS, MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE,
+    MAP_ANONYMOUS, MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_FIXED,
 };
+use crate::const_def;
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::sync::UPIntrFreeCell;
 
@@ -48,7 +49,7 @@ pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
     heap: BTreeMap<VirtPageNum, FrameTracker>,
-    mmap_areas: Vec<MemoryMapArea>,
+    pub mmap_areas: Vec<MemoryMapArea>,
 }
 
 impl MemorySet {
@@ -459,6 +460,12 @@ impl MemorySet {
             println!("{:#}", area);
         }
     }
+
+    pub fn print_mmap_area(&self) {
+        for area in &self.mmap_areas {
+            println!("{:#}", area);
+        }
+    }
     
     pub fn insert_mmap_area(&mut self, mmap_area: MemoryMapArea) {
         self.mmap_areas.push(mmap_area);
@@ -511,6 +518,20 @@ impl MemorySet {
             return area.map_one(&mut self.page_table, vpn);
         }
         false
+    }
+
+    /// 为所有页面分配内存
+    /// 不映射文件
+    pub fn alloc_mmap_area(&mut self, va: VirtAddr) {
+        let vpn: VirtPageNum = va.floor();
+        if let Some(area) = self
+            .mmap_areas
+            .iter_mut()
+            .find(|area| area.vpn_range.contain(vpn))
+        {
+            // return area.map_one(&mut self.page_table, vpn, fd_table);
+            return area.map(&mut self.page_table);
+        }
     }
 }
 
@@ -672,11 +693,11 @@ pub fn remap_test() {
 
 pub struct MemoryMapArea {
     pub vpn_range: VPNRange,
-    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
-    map_perm: MapPermission,
-    fd: usize,
-    offset: usize,
-    flags: usize,
+    pub data_frames: BTreeMap<VirtPageNum, FrameTracker>,
+    pub map_perm: MapPermission,
+    pub fd: usize,
+    pub offset: usize,
+    pub flags: usize,
 }
 
 impl MemoryMapArea {
@@ -720,9 +741,8 @@ impl MemoryMapArea {
         // fd_table: Vec<Option<FileDescriptor>>,
     ) -> bool {
         // 分配物理页
-        let ppn: PhysPageNum;
         let frame = frame_alloc().unwrap();
-        ppn = frame.ppn;
+        let ppn = frame.ppn;
         self.data_frames.insert(vpn, frame);
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
         page_table.map(vpn, ppn, pte_flags);
@@ -747,6 +767,14 @@ impl MemoryMapArea {
         // }
         return true;
     }
+
+    /// 为所有页面分配内存
+    /// 不映射文件
+    pub fn map(&mut self, page_table: &mut PageTable) {
+        for vpn in self.vpn_range.into_iter() {
+            self.map_one(page_table, vpn);
+        }
+    }
     
     pub fn unmap(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
@@ -755,6 +783,18 @@ impl MemoryMapArea {
                 page_table.unmap(vpn);
             }
         }
+    }
+}
+
+impl Display for MemoryMapArea {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let start_virt_addr = VirtAddr::from(self.vpn_range.get_start());
+        let end_virt_addr = VirtAddr::from(self.vpn_range.get_end());
+        write!(
+            f,
+            "{:<#16x}  {:<#16x}   {:#}   fd: {}   FIXED: {}",
+            start_virt_addr.0, end_virt_addr.0, self.map_perm, self.fd, self.flags & MAP_FIXED != 0
+        )
     }
 }
 
