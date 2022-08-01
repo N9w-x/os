@@ -99,10 +99,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
             *translated_refmut(token, ptid as *mut u32) = child_tid as u32;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) && ctid as usize != 0 {
-            child_task_inner.clear_child_tid = Some(ClearChildTid {
-                ctid: *translated_ref(token, ctid as *mut u32),
-                addr: ctid,
-            })
+            child_task_inner.clear_child_tid = ctid;
         }
         if flags.contains(CloneFlag::CLONE_SETTLS) {
             child_trap_cx.x[4] = tls;
@@ -120,21 +117,21 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         let child_task = child_process_inner.tasks[0].as_ref().unwrap();
         let mut child_task_inner = child_task.inner_exclusive_access();
         let child_pid = child_process.getpid();
+        let child_tid = child_task_inner.gettid();
 
         // if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         //     return -1;
         // }
         if flags.contains(CloneFlag::CLONE_PARENT_SETTID) && ptid != 0 {
-            *translated_refmut(process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_pid as u32;
+            *translated_refmut(process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
+            *translated_refmut(child_process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) && ctid != 0 {
-            child_task_inner.clear_child_tid = Some(ClearChildTid {
-                ctid: *translated_ref(token, ctid as *mut u32),
-                addr: ctid as usize
-            });
+            child_task_inner.clear_child_tid = ctid;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
-            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_pid as u32;
+            child_task_inner.set_child_tid = ctid;
+            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_tid as u32;
         }
 
         //更改用户栈
@@ -373,30 +370,30 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     }
 }
 
-// pub fn sys_mprotect(addr: usize, len: usize, prot: usize) -> isize {
-//     if addr == 0 || addr % PAGE_SIZE != 0 {// addr对齐到页面
-//         -1
-//     } else {
-//         // current_process()
-//         //     .inner_exclusive_access()
-//         //     .mprotect(addr, align_up(len), prot);
-//         let process = current_process();
-//         let mut inner = process.inner_exclusive_access();
-//         let flag = PTEFlags::from_bits((prot as u8) << 1).unwrap();
-//         let mut curr_addr = addr;
-//         loop {
-//             if curr_addr >= addr + len {
-//                 break;
-//             }
-//             let vpn = VirtPageNum::from(VirtAddr::from(curr_addr));
-//             if !inner.memory_set.set_pte_flags(vpn, flag) {
-//                 return -1;
-//             }
-//             curr_addr += PAGE_SIZE;
-//         }
-//         0
-//     }
-// }
+pub fn sys_mprotect(addr: usize, len: usize, prot: usize) -> isize {
+    if addr == 0 || addr % PAGE_SIZE != 0 {// addr对齐到页面
+        -1
+    } else {
+        // current_process()
+        //     .inner_exclusive_access()
+        //     .mprotect(addr, align_up(len), prot);
+        let process = current_process();
+        let mut inner = process.inner_exclusive_access();
+        let flag = PTEFlags::from_bits((prot as u8) << 1).unwrap();
+        let mut curr_addr = addr;
+        loop {
+            if curr_addr >= addr + len {
+                break;
+            }
+            let vpn = VirtPageNum::from(VirtAddr::from(curr_addr));
+            if !inner.memory_set.set_pte_flags(vpn, flag) {
+                return -1;
+            }
+            curr_addr += PAGE_SIZE;
+        }
+        0
+    }
+}
 
 //that's only root user
 pub fn sys_get_uid() -> isize {
@@ -410,14 +407,8 @@ pub fn sys_get_euid() -> isize {
 pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
     let token = current_user_token();
     let task = current_task().unwrap();
-    let task_inner = task.inner_exclusive_access();
-
-    let ctid = if let Some(p) = &task_inner.clear_child_tid {
-        p.ctid
-    } else {
-        0
-    };
-    *translated_refmut(token, tid_ptr as *mut u32) = ctid;
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.clear_child_tid = tid_ptr;
     task_inner.gettid() as isize
 }
 
@@ -622,22 +613,22 @@ pub fn sys_clock_gettime(clk_id: isize, tp: *mut usize) -> isize {
     }
 }
 
-pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
-    if addr % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
-        return -1;
-    }
-    let pcb = current_process();
-    let memory_set = &mut pcb.inner_exclusive_access().memory_set;
+// pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
+//     if addr % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
+//         return -1;
+//     }
+//     let pcb = current_process();
+//     let memory_set = &mut pcb.inner_exclusive_access().memory_set;
     
-    let start_vpn = addr / PAGE_SIZE;
-    for i in 0..(len / PAGE_SIZE) {
-        let vpn = start_vpn + i;
-        if memory_set.set_mem_flags(VirtPageNum::from(vpn), prot as usize) == -1 {
-            return -1;
-        }
-    }
-    0
-}
+//     let start_vpn = addr / PAGE_SIZE;
+//     for i in 0..(len / PAGE_SIZE) {
+//         let vpn = start_vpn + i;
+//         if memory_set.set_mem_flags(VirtPageNum::from(vpn), prot as usize) == -1 {
+//             return -1;
+//         }
+//     }
+//     0
+// }
 
 #[derive(Clone, Copy, Debug)]
 pub struct RLimit64 {

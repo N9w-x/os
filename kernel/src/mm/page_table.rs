@@ -119,22 +119,22 @@ impl PageTable {
         result
     }
     
-    pub fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        let idxs = vpn.indexes();
-        let mut ppn = self.root_ppn;
-        for i in 0..3 {
-            let pte = &mut ppn.get_pte_array()[idxs[i]];
-            if i == 2 {
-                pte.set_flags(flags);
-                break;
-            }
-            if !pte.is_valid() {
-                return -1;
-            }
-            ppn = pte.ppn();
-        }
-        0
-    }
+    // pub fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     let idxs = vpn.indexes();
+    //     let mut ppn = self.root_ppn;
+    //     for i in 0..3 {
+    //         let pte = &mut ppn.get_pte_array()[idxs[i]];
+    //         if i == 2 {
+    //             pte.set_flags(flags);
+    //             break;
+    //         }
+    //         if !pte.is_valid() {
+    //             return -1;
+    //         }
+    //         ppn = pte.ppn();
+    //     }
+    //     0
+    // }
     
     #[allow(unused)]
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
@@ -166,18 +166,19 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
-    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
-    //     if let Some(pte) = self.find_pte(vpn) {
-    //         if !pte.is_valid() {
-    //             return false;
-    //         }
-    //         pte.bits = pte.ppn().0 << 10 
-    //             | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
-    //             true
-    //     } else {
-    //         false
-    //     }
-    // }
+
+    pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+        if let Some(pte) = self.find_pte(vpn) {
+            if !pte.is_valid() {
+                return false;
+            }
+            pte.bits = pte.ppn().0 << 10 
+                | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
+                true
+        } else {
+            false
+        }
+    }
 }
 
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {

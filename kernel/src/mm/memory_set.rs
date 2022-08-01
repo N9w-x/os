@@ -54,42 +54,42 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
-    pub fn set_mem_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        const PROT_NONE: usize = 0;
-        const PROT_READ: usize = 1;
-        const PROT_WRITE: usize = 2;
-        const PROT_EXEC: usize = 4;
+    // pub fn set_mem_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     const PROT_NONE: usize = 0;
+    //     const PROT_READ: usize = 1;
+    //     const PROT_WRITE: usize = 2;
+    //     const PROT_EXEC: usize = 4;
         
-        let pte_res = self.set_pte_flags(vpn, flags);
-        let mut map_area_res = -1;
-        for area in &mut self.areas {
-            if area.vpn_range.contain(vpn) {
-                let mut map_perm = MapPermission::U;
-                if (flags & PROT_READ) != 0 {
-                    map_perm |= MapPermission::R
-                }
-                if flags & PROT_WRITE != 0 {
-                    map_perm |= MapPermission::W
-                }
-                if flags & PROT_EXEC != 0 {
-                    map_perm |= MapPermission::X
-                }
+    //     let pte_res = self.set_pte_flags(vpn, PTEFlags::from_bits((flags as u8) << 1));
+    //     let mut map_area_res = -1;
+    //     for area in &mut self.areas {
+    //         if area.vpn_range.contain(vpn) {
+    //             let mut map_perm = MapPermission::U;
+    //             if (flags & PROT_READ) != 0 {
+    //                 map_perm |= MapPermission::R
+    //             }
+    //             if flags & PROT_WRITE != 0 {
+    //                 map_perm |= MapPermission::W
+    //             }
+    //             if flags & PROT_EXEC != 0 {
+    //                 map_perm |= MapPermission::X
+    //             }
                 
-                area.map_perm = map_perm;
-                break;
-            }
-        }
+    //             area.map_perm = map_perm;
+    //             break;
+    //         }
+    //     }
         
-        if map_area_res == -1 || pte_res == -1 {
-            -1
-        } else {
-            0
-        }
-    }
+    //     if map_area_res == -1 || !pte_res {
+    //         -1
+    //     } else {
+    //         0
+    //     }
+    // }
     
-    fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        self.page_table.set_pte_flags(vpn, flags)
-    }
+    // fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     self.page_table.set_pte_flags(vpn, flags)
+    // }
     
     pub fn new_bare() -> Self {
         Self {
@@ -545,9 +545,9 @@ impl MemorySet {
         }
     }
 
-    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
-    //     self.page_table.set_pte_flags(vpn, flags)
-    // }
+    pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+        self.page_table.set_pte_flags(vpn, flags)
+    }
 }
 
 pub struct MapArea {

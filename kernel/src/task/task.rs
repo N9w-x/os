@@ -35,7 +35,8 @@ pub struct TaskControlBlockInner {
     pub task_cx: TaskContext,
     pub task_status: TaskStatus,
     pub exit_code: Option<i32>,
-    pub clear_child_tid: Option<ClearChildTid>,
+    pub set_child_tid: usize,
+    pub clear_child_tid: usize,
     /// 待响应信号
     pub signals: Signum,
     /// 正在响应的信号
@@ -83,7 +84,8 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
-                    clear_child_tid: None,
+                    set_child_tid: 0,
+                    clear_child_tid: 0,
                     signals: Signum::empty(),
                     signal_handling: 0,
                     signal_masks: Signum::empty(),
@@ -98,10 +100,7 @@ impl TaskControlBlock {
     pub fn gettid(&self) -> usize {
         self
             .inner_exclusive_access()
-            .res
-            .as_ref()
-            .unwrap()
-            .tid
+            .gettid()
     }
 
     pub fn get_task_id(&self) -> usize {

@@ -103,9 +103,9 @@ mod errno;
 mod net;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
+    // if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
-    //}
+    // }
     
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
@@ -170,7 +170,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_TIMES => sys_get_times(args[0] as *mut u64),
         SYSCALL_UNAME => sys_uname(args[0] as *mut u8),
         SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
-        SYSCALL_MPROTECT => sys_mprotect(args[0], args[1], args[2] as isize),
+        SYSCALL_MPROTECT => sys_mprotect(args[0], args[1], args[2]),
         // SYSCALL_FUTEX => sys_futex(args[0], args[1], args[2], args[3], args[4], args[5]),
         SYSCALL_FUTEX => 0,
         SYSCALL_TKILL => sys_tkill(args[0], args[1]),
