@@ -12,11 +12,13 @@ extern crate alloc;
 extern crate bitflags;
 
 use lazy_static::*;
+use riscv::register::mstatus::set_fs;
+use riscv::register::sstatus::{FS, Sstatus};
 
 use sync::UPIntrFreeCell;
 
 use crate::sbi::send_ipi;
-use crate::task::{get_hart_id, save_hart_id};
+use crate::task::{ENTRY_STATIC_DATA, get_hart_id, save_hart_id, TEST_SH_DATA};
 
 #[cfg(feature = "board_k210")]
 #[path = "boards/k210.rs"]
@@ -71,10 +73,17 @@ pub fn rust_main() -> ! {
         sbi::hart_suspend(0x0, wait_core as usize);
         loop {}
     } else {
-        println!("main hart start");
+        unsafe {
+            riscv::register::sstatus::set_fs(FS::Clean);
+        };
         clear_bss();
         mm::init();
+        {
+            let data_lock = ENTRY_STATIC_DATA.exclusive_access();
+            data_lock.as_slice();
+        }
         trap::init();
+        println!("trap init success");
         trap::enable_timer_interrupt();
         timer::set_next_trigger();
         board::device_init();

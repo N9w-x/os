@@ -10,8 +10,8 @@ use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 
 use crate::console::INFO;
 use crate::fs_fat::{
-    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
-    open_file, OpenFlags, OSInode, WorkPath, AT_FD_CWD, VFSFlag,
+    AT_FD_CWD, ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat,
+    make_pipe, open_file, OpenFlags, OSInode, VFSFlag, WorkPath,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
@@ -19,7 +19,7 @@ use crate::mm::{
 use crate::task::{current_process, current_task, current_user_token, TimeSpec, UTIME_NOW, UTIME_OMIT};
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
-use super::errno::{EPERM, EMFILE, ESPIPE, EBADF, ENOENT};
+use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();

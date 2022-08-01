@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use lazy_static::*;
 
+pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use info::CloneFlag;
@@ -22,6 +23,7 @@ use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
 use crate::mm::{add_free, UserBuffer, translated_refmut};
 use crate::sync::futex_wake;
 
+mod cache;
 mod context;
 mod id;
 mod info;
