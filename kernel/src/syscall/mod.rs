@@ -1,12 +1,12 @@
 use alloc::format;
 
+use errno::*;
 use fs::*;
+use net::*;
 use process::*;
 use sync::*;
 use thread::*;
 use utils::*;
-use errno::*;
-use net::*;
 
 use crate::console::{ERROR, INFO};
 use crate::const_def;
@@ -101,9 +101,9 @@ mod errno;
 mod net;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
-        println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
-    }
+    //if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
+    //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
+    //}
     
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
@@ -200,10 +200,11 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_IOCTL => 0,
         SYSCALL_PREAD64 => sys_pread64(args[0], args[1] as *mut u8, args[2], args[3]),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
+        501 => panic!("shut down"),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
-            let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
-            println!("{}", log);
+            //let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
+            //println!("{}", log);
             0
         } //_ => 0,
     }

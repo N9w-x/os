@@ -14,7 +14,7 @@ use lazy_static::*;
 use sync::UPIntrFreeCell;
 
 use crate::sbi::send_ipi;
-use crate::task::get_hart_id;
+use crate::task::{get_hart_id, save_hart_id};
 
 #[cfg(feature = "board_k210")]
 #[path = "boards/k210.rs"]
@@ -63,27 +63,37 @@ extern "C" fn wait_core(hart_id: usize) {
 
 #[no_mangle]
 pub fn rust_main() -> ! {
-    /*    let hart_id = get_hart_id();
-    /println!("hart id {}", hart_id);
+    save_hart_id();
+    let hart_id = get_hart_id();
     if hart_id != 0 {
         sbi::hart_suspend(0x0, wait_core as usize);
-        println!("hello from hart {}", hart_id);
         loop {}
     } else {
         println!("main hart start");
-        loop {}
-    }*/
-    clear_bss();
-    mm::init();
-    trap::init();
-    trap::enable_timer_interrupt();
-    timer::set_next_trigger();
-    board::device_init();
-    fs_fat::list_apps();
-    fs_fat::init_rootfs();
-    task::add_initproc();
-    *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
-    println!("start run tasks");
-    task::run_tasks();
-    panic!("Unreachable in rust_main!");
+        clear_bss();
+        mm::init();
+        trap::init();
+        trap::enable_timer_interrupt();
+        timer::set_next_trigger();
+        board::device_init();
+        fs_fat::list_apps();
+        fs_fat::init_rootfs();
+        task::add_initproc();
+        *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+        println!("start run tasks");
+        task::run_tasks();
+        panic!("Unreachable in rust_main!");
+    }
+    //clear_bss();
+    //mm::init();
+    //trap::init();
+    //trap::enable_timer_interrupt();
+    //timer::set_next_trigger();
+    //board::device_init();
+    //fs_fat::list_apps();
+    //task::add_initproc();
+    //*DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+    //println!("start run tasks");
+    //task::run_tasks();
+    //panic!("Unreachable in rust_main!");
 }

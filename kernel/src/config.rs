@@ -4,9 +4,9 @@ pub use crate::board::{CLOCK_FREQ, MMIO};
 pub const USER_STACK_SIZE: usize = 4096 * 6;
 //0x2000
 pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
-pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x300;
+pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x1000;
 //
-pub const MEMORY_END: usize = 0x8080_0000;
+pub const MEMORY_END: usize = 0x8000_0000 + 0x10_0000 * 128;
 pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_SIZE_BITS: usize = 0xc;
 
@@ -72,7 +72,6 @@ const_def!(AT_HWCAP2, 26);
 const_def!(AT_EXECFN, 31);
 const_def!(AT_SYSINFO, 32);
 const_def!(AT_SYSINFO_EHDR, 33);
-
 
 const_def!(RLIMIT_CPU, 0);
 const_def!(RLIMIT_FSIZE, 1);

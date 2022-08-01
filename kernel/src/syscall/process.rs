@@ -6,10 +6,10 @@ use core::mem::size_of;
 
 use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED, FD_MAX, RLIMIT_FSIZE, RLIMIT_NOFILE};
 use crate::console::{ERROR, INFO, WARNING};
-use crate::fs_fat::{FileType, open_file, OpenFlags, FileDescriptor, File};
+use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::{
     align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str,
-    UserBuffer, VirtPageNum, VirtAddr,
+    UserBuffer, VirtAddr, VirtPageNum,
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
@@ -174,7 +174,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
             let process = current_process();
             let mut inner = process.inner_exclusive_access();
             let token = inner.get_user_token();
-        
+
             if !inner
                 .children
                 .iter()
@@ -183,7 +183,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                 found = false;
                 // ---- release current PCB
             }
-        
+
             if found {
                 let pair = inner.children.iter().enumerate().find(|(_, p)| {
                     // println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
@@ -193,13 +193,13 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                     drop(inner);
                     flag
                 });
-            
+
                 if let Some((idx, _)) = pair {
                     let child = inner.children.remove(idx);
                     assert_eq!(Arc::strong_count(&child), 1);
                     let found_pid = child.getpid();
                     let exit_code = child.inner_exclusive_access().exit_code;
-                
+    
                     if exit_code_ptr as usize != 0 {
                         *translated_refmut(token, exit_code_ptr) = (exit_code & 0xff) << 8;
                     }
@@ -314,7 +314,10 @@ pub fn sys_mmap(
     } else {
         fd
     };
-    println!("[mmap] start: {:#X}, len: {:#X}, flag: {:#X}", align_start, align_len, flags);
+    println!(
+        "[mmap] start: {:#X}, len: {:#X}, flag: {:#X}",
+        align_start, align_len, flags
+    );
     drop(inner);
     process.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
     align_start as isize
@@ -563,14 +566,18 @@ pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
     0
 }
 
-
 #[derive(Clone, Copy, Debug)]
 pub struct RLimit64 {
-	pub rlim_cur: usize ,
-	pub rlim_max: usize ,
+    pub rlim_cur: usize,
+    pub rlim_max: usize,
 }
 
-pub fn sys_prlimit(pid: usize, resource: usize, rlimit: *const RLimit64, old_rlimit: *mut RLimit64) -> isize {
+pub fn sys_prlimit(
+    pid: usize,
+    resource: usize,
+    rlimit: *const RLimit64,
+    old_rlimit: *mut RLimit64,
+) -> isize {
     let token = current_user_token();
     let process = current_process();
     let mut inner = process.inner_exclusive_access();

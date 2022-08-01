@@ -126,12 +126,13 @@ run-inner: build-pull
 ifeq ($(BOARD),qemu)
 	@qemu-system-riscv64 \
 		-machine virt \
+		-kernel $(KERNEL_ELF) \
+		-m 128M \
 		-nographic \
 		-bios $(BOOTLOADER) \
-		-device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) \
 		-drive file=$(FS_IMG),if=none,format=raw,id=x0 \
         -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0 \
-#        -smp 2
+        -smp 2
 else
 	(which $(K210-BURNER)) || (cd .. && git clone https://github.com/sipeed/kflash.py.git && mv kflash.py tools)
 	@cp $(BOOTLOADER) $(BOOTLOADER).copy
@@ -169,4 +170,10 @@ handin-k210: build
 	@dd if=$(KERNEL_BIN) of=$(BOOTLOADER).copy bs=$(K210_BOOTLOADER_SIZE) seek=1
 	@mv $(BOOTLOADER).copy $(HANDIN_BIN)
 
-.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull user-apps handin-k210
+HANDIN_ELF := ../kernel-qemu
+
+handin-qemu: env kernel-pull
+	@cp $(BOOTLOADER) ../sbi-qemu
+	@cp $(KERNEL_ELF) $(HANDIN_ELF)
+
+.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull user-apps handin-k210 handin-qemu

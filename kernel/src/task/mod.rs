@@ -6,7 +6,6 @@ use lazy_static::*;
 pub use context::TaskContext;
 pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
 pub use info::CloneFlag;
-pub use timer::{TimeVal, TimeSpec, ITimerVal, ITIMER_MANAGER};
 pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
 use process::ProcessControlBlock;
 pub use processor::{
@@ -16,6 +15,7 @@ pub use processor::{
 pub use signal::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
+pub use timer::{ITIMER_MANAGER, ITimerVal, TimeSpec, TimeVal};
 
 use crate::config::PAGE_SIZE;
 use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
@@ -223,6 +223,12 @@ pub fn current_add_signal(signal: Signum) {
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     process_inner.signals |= signal;
+}
+
+pub fn save_hart_id() {
+    unsafe {
+        core::arch::asm!("mv tp,a0");
+    }
 }
 
 pub fn get_hart_id() -> usize {
