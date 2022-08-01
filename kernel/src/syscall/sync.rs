@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 
 use crate::config::CLOCK_FREQ;
 use crate::mm::{translated_ref, translated_refmut};
-use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore};
+use crate::sync::{Condvar, Mutex, MutexBlocking, MutexSpin, Semaphore, FUTEX_CLOCK_REALTIME, FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE, futex_wait, futex_wake, futex_requeue, FUTEX_OP_MASK};
 use crate::task::{
     block_current_and_run_next, current_process, current_task, current_user_token,
     suspend_current_and_run_next,
@@ -157,4 +157,39 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
     drop(process_inner);
     condvar.wait_with_mutex(mutex);
     0
+}
+
+pub fn sys_futex(
+    uaddr: usize,
+    op: usize,
+    val: usize,
+    timeout: usize,
+    uaddr2: usize,
+    val3: usize,
+) -> isize {
+    if op & FUTEX_CLOCK_REALTIME != 0 && op & FUTEX_OP_MASK != FUTEX_WAIT {
+        return -1;
+    }
+
+    let op = op & FUTEX_OP_MASK;
+    // println!("[futex] tid: {}, op: {:#X}, uaddr: {:#X}, val: {}", current_task().unwrap().gettid(), op, uaddr, val as isize);
+    let a = match op {
+        FUTEX_WAIT => {
+            // println!("[futex] wait");
+            futex_wait(uaddr, val, 0) as isize
+        },
+        FUTEX_WAKE => {
+            // println!("[futex] wake");
+            futex_wake(uaddr, val) as isize
+        },
+        FUTEX_REQUEUE => {
+            // println!("[futex] requeue");
+            futex_requeue(uaddr, val, uaddr2) as isize
+        },
+        _ => {
+            unimplemented!("unsupported futex op: {:#x}", op);
+        }
+    };
+    // println!("[futex] ret: {}", a);
+    a
 }

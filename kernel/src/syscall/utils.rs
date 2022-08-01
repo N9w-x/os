@@ -16,6 +16,7 @@ pub fn sys_uname(buf: *mut u8) -> isize {
     }
 }
 
+#[allow(non_camel_case_types)]
 struct utsname {
     sysname: [u8; 65],
     nodename: [u8; 65],

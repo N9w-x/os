@@ -3,6 +3,8 @@
 #![allow(unused)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#![feature(map_try_insert)]
+#![feature(map_first_last)]
 #![feature(bool_to_option)]
 
 extern crate alloc;

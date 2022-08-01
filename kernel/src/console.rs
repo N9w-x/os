@@ -34,6 +34,12 @@ macro_rules! println {
     }
 }
 
+macro_rules! eprintln {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        $crate::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?))
+    }
+}
+
 #[macro_export]
 macro_rules! dbg {
     ($fmt: literal $(, $($arg: tt)+)?) => {

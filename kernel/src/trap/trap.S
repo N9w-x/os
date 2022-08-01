@@ -10,6 +10,7 @@
     .globl __restore
     .globl __alltraps_k
     .globl __restore_k
+    .globl __sigreturn
     .align 2
 __alltraps:
     csrrw sp, sscratch, sp
@@ -102,3 +103,7 @@ __restore_k:
     .endr
     addi sp, sp, 34*8
     sret
+
+__sigreturn:
+    li a7, 139
+    ecall

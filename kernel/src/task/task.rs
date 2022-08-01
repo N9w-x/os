@@ -1,5 +1,5 @@
 use super::id::TaskUserRes;
-use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext};
+use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext, Signum, SignalStruct};
 use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::{UPIntrFreeCell, UPIntrRefMut}};
 use alloc::sync::{Arc, Weak};
@@ -24,6 +24,11 @@ impl TaskControlBlock {
     }
 }
 
+pub struct ClearChildTid {
+    pub ctid: u32,
+    pub addr: usize,
+}
+
 pub struct TaskControlBlockInner {
     pub res: Option<TaskUserRes>,
     pub trap_cx_ppn: PhysPageNum,
@@ -31,12 +36,16 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     pub exit_code: Option<i32>,
     pub clear_child_tid: Option<ClearChildTid>,
-}
-
-#[derive(Debug)]
-pub struct ClearChildTid {
-    pub ctid: u32,
-    pub addr: usize,
+    /// 待响应信号
+    pub signals: Signum,
+    /// 正在响应的信号
+    pub signal_handling: usize,
+    /// 要屏蔽的信号（全局屏蔽）
+    pub signal_masks: Signum,
+    pub killed: bool,
+    pub frozen: bool,
+    /// 被打断的trap上下文
+    pub trap_ctx_backup: Option<TrapContext>,
 }
 
 impl TaskControlBlockInner {
@@ -75,9 +84,33 @@ impl TaskControlBlock {
                     task_status: TaskStatus::Ready,
                     exit_code: None,
                     clear_child_tid: None,
+                    signals: Signum::empty(),
+                    signal_handling: 0,
+                    signal_masks: Signum::empty(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                 })
             },
         }
+    }
+
+    pub fn gettid(&self) -> usize {
+        self
+            .inner_exclusive_access()
+            .res
+            .as_ref()
+            .unwrap()
+            .tid
+    }
+
+    pub fn get_task_id(&self) -> usize {
+        self
+            .inner_exclusive_access()
+            .res
+            .as_ref()
+            .unwrap()
+            .id
     }
 }
 

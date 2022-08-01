@@ -1,12 +1,12 @@
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE, MAP_FIXED, PAGE_SIZE, FD_MAX};
 use crate::console::INFO;
-use crate::fs_fat::{File, FileDescriptor, Stdin, Stdout, WorkPath};
+use crate::fs_fat::{AT_FD_CWD, File, FileDescriptor, FileType, open_file, OpenFlags, OSInode, Stdin, Stdout, WorkPath};
 use crate::mm::{
     AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
     translated_refmut, VirtAddr, VirtPageNum, translated_byte_buffer, UserBuffer, VPNRange,
@@ -18,7 +18,7 @@ use crate::trap::{trap_handler, TrapContext};
 use super::{add_task, ITimerVal, Signum, current_user_token};
 use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
-use super::manager::insert_into_pid2process;
+use super::manager::{insert_into_pid2process, insert_into_tid2task};
 use super::TaskControlBlock;
 
 pub struct ProcessControlBlock {
@@ -41,18 +41,8 @@ pub struct ProcessControlBlockInner {
     pub exit_code: i32,
     pub fd_table: Vec<Option<FileDescriptor>>,
     pub fd_max: usize,
-    /// 待响应信号
-    pub signals: Signum,
-    /// 正在响应的信号
-    pub signal_handling: usize,
-    /// 要屏蔽的信号（全局屏蔽）
-    pub signal_masks: Signum,
     /// 信号处理方式列表
     pub signal_actions: SignalStruct,
-    pub killed: bool,
-    pub frozen: bool,
-    /// 被打断的trap上下文
-    pub trap_ctx_backup: Option<TrapContext>,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
@@ -61,7 +51,7 @@ pub struct ProcessControlBlockInner {
     //工作目录
     pub work_path: WorkPath,
     //tid attribute
-    pub tid_attr: PCBAttribute,
+    // pub tid_attr: PCBAttribute,
     // user_heap
     pub heap_base: VirtAddr,
     pub heap_end: VirtAddr,
@@ -94,12 +84,12 @@ impl ProcessControlBlockInner {
         new_fd
     }
 
-    pub fn alloc_tid(&mut self) -> usize {
+    pub fn alloc_id(&mut self) -> usize {
         self.task_res_allocator.alloc()
     }
 
-    pub fn dealloc_tid(&mut self, tid: usize) {
-        self.task_res_allocator.dealloc(tid)
+    pub fn dealloc_id(&mut self, id: usize) {
+        self.task_res_allocator.dealloc(id)
     }
 
     pub fn thread_count(&self) -> usize {
@@ -144,23 +134,23 @@ impl ProcessControlBlock {
                         Some(FileDescriptor::Abstract(Arc::new(Stdout))),
                     ],
                     fd_max: FD_MAX,
-                    signals: Signum::empty(),
-                    signal_handling: 0,
-                    signal_masks: Signum::empty(),
+                    // signals: Signum::empty(),
+                    // signal_handling: 0,
+                    // signal_masks: Signum::empty(),
                     signal_actions: SignalStruct::default(),
-                    killed: false,
-                    frozen: false,
-                    trap_ctx_backup: None,
+                    // killed: false,
+                    // frozen: false,
+                    // trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: WorkPath::new(),
-                    tid_attr: PCBAttribute {
-                        set_child_tid: 0,
-                        clear_child_tid: 0,
-                    },
+                    // tid_attr: PCBAttribute {
+                    //     set_child_tid: 0,
+                    //     clear_child_tid: 0,
+                    // },
                     heap_base: uheap_base.into(),
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
@@ -175,6 +165,7 @@ impl ProcessControlBlock {
             ustack_base,
             true,
         ));
+        insert_into_tid2task(task.gettid(), Arc::clone(&task));
         // prepare trap_cx of main thread
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
@@ -401,23 +392,23 @@ impl ProcessControlBlock {
                     exit_code: 0,
                     fd_table: new_fd_table,
                     fd_max: FD_MAX,
-                    signals: Signum::empty(),
-                    signal_handling: 0,
-                    signal_masks: Signum::empty(),
+                    // signals: Signum::empty(),
+                    // signal_handling: 0,
+                    // signal_masks: Signum::empty(),
                     signal_actions: SignalStruct::default(),
-                    killed: false,
-                    frozen: false,
-                    trap_ctx_backup: None,
+                    // killed: false,
+                    // frozen: false,
+                    // trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     work_path: path,
-                    tid_attr: PCBAttribute {
-                        set_child_tid: 0,
-                        clear_child_tid: 0,
-                    },
+                    // tid_attr: PCBAttribute {
+                    //     set_child_tid: 0,
+                    //     clear_child_tid: 0,
+                    // },
                     heap_base: parent.heap_base,
                     heap_end: parent.heap_end,
                     mmap_area_base: parent.mmap_area_base,
@@ -442,6 +433,7 @@ impl ProcessControlBlock {
             // but mention that we allocate a new kstack here
             false,
         ));
+        insert_into_tid2task(task.gettid(), Arc::clone(&task));
         // attach task to child process
         let mut child_inner = child.inner_exclusive_access();
         child_inner.tasks.push(Some(Arc::clone(&task)));
@@ -455,6 +447,42 @@ impl ProcessControlBlock {
         // add this thread to scheduler
         add_task(task);
         child
+    }
+
+    pub fn clone_thread(
+        self: &Arc<Self>,
+        parent_task: Arc<TaskControlBlock>,
+    ) -> Arc<TaskControlBlock> {
+        let task = Arc::new(TaskControlBlock::new(
+            Arc::clone(self),
+            parent_task
+                .inner_exclusive_access()
+                .res
+                .as_ref()
+                .unwrap()
+                .ustack_base(),
+            true,
+        ));
+
+        // attach task to child process
+        let task_id = task.get_task_id();
+        let tasks = &mut self.inner_exclusive_access().tasks;
+        while tasks.len() < task_id + 1 {
+            tasks.push(None);
+        }
+        tasks[task_id] = Some(Arc::clone(&task));
+        
+        // modify kstack_top in trap_cx of this thread
+        let task_inner = task.inner_exclusive_access();
+        let trap_cx = task_inner.get_trap_cx();
+        *trap_cx = *parent_task.inner_exclusive_access().get_trap_cx();
+        trap_cx.kernel_sp = task.kstack.get_top();
+
+        drop(task_inner);
+        insert_into_tid2task(task.gettid(), Arc::clone(&task));
+        add_task(Arc::clone(&task));
+
+        task
     }
 
     pub fn getpid(&self) -> usize {
@@ -666,5 +694,33 @@ impl ProcessControlBlock {
             }
         }
         return;
+    }
+}
+
+impl UPIntrRefMut<'_, ProcessControlBlockInner> {
+    /// 打开dirfd文件夹下，路径为path的文件
+    pub fn open_file(self, dirfd: isize, path: String, flags: OpenFlags) -> Option<Arc<OSInode>>  {
+        if WorkPath::is_abs_path(&path) {
+            drop(self);
+            open_file("/", &path, flags, FileType::Regular)
+        } else if dirfd == AT_FD_CWD {
+            let work_path = self.work_path.to_string();
+            drop(self);
+            open_file(&work_path, &path, flags, FileType::Dir)
+        } else {
+            if dirfd as usize >= self.fd_table.len() {
+                return None;
+            }
+
+            if let Some(FileDescriptor::Regular(os_inode)) = self.fd_table[dirfd as usize].clone() {
+                if !os_inode.is_dir() {
+                    return None;
+                }
+                drop(self);
+                os_inode.create(&path, FileType::Regular)
+            } else {
+                None
+            }
+        }
     }
 }

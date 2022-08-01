@@ -10,8 +10,8 @@ use spin::Mutex;
 
 use crate::config::USER_STACK_SIZE;
 use crate::drivers::BLOCK_DEVICE;
-use crate::fs_fat::{Dirent, File, get_current_inode, Kstat};
-use crate::fs_fat::fs_info::{DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, VFSFlag};
+use crate::fs_fat::fs_info::{VFSFlag, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN};
+use crate::fs_fat::{get_current_inode, Dirent, File, Kstat};
 use crate::mm::UserBuffer;
 use crate::task::current_user_token;
 
@@ -197,7 +197,7 @@ impl OSInode {
             }
         }
         .bits();
-    
+
         fstat.update(
             self.get_inode_id() as u64,
             st_mode,
@@ -207,7 +207,7 @@ impl OSInode {
             create_t,
         );
     }
-    
+
     pub fn lseek(&self, offset: isize, whence: i32) -> isize {
         const SEEK_SET: i32 = 0;
         const SEEK_CUR: i32 = 1;
@@ -220,7 +220,7 @@ impl OSInode {
         } else if offset < 0 {
             return -1;
         }
-        
+
         match whence {
             SEEK_SET => {
                 inner.offset = offset as usize;
@@ -234,7 +234,7 @@ impl OSInode {
             }
             _ => return -1,
         }
-        
+
         inner.offset as isize
     }
 }
@@ -351,7 +351,7 @@ impl Into<u8> for FileType {
     }
 }
 
-//path可以是基于当前工作路径的相对路径或者绝对路径
+/// path可以是基于当前工作路径的相对路径或者绝对路径
 pub fn open_file(
     work_path: &str,
     path: &str,
@@ -360,8 +360,7 @@ pub fn open_file(
 ) -> Option<Arc<OSInode>> {
     let cur_inode = get_current_inode(work_path);
     let (readable, writable) = flags.read_write();
-    let mut path_split: Vec<&str> = path.split('/').collect();
-
+    let mut path_split: Vec<&str> = path.split('/').filter(|s| s.len() > 0).collect();
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
         //如果文件存在删除对应文件

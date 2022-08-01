@@ -12,7 +12,8 @@ use xmas_elf::ElfFile;
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
-    MAP_ANONYMOUS, MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_FIXED,
+    MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE, MAP_ANONYMOUS, SIGRETURN_TRAMPOLINE,
+    MAP_FIXED,
 };
 use crate::const_def;
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
@@ -153,6 +154,14 @@ impl MemorySet {
         );
     }
 
+    fn map_sigreturn_trampoline(&mut self) {
+        self.page_table.map(
+            VirtAddr::from(SIGRETURN_TRAMPOLINE).into(),
+            PhysAddr::from(strampoline as usize).into(),
+            PTEFlags::R | PTEFlags::X | PTEFlags::U,
+        );
+    }
+
     /// Without kernel stacks.
     pub fn new_kernel() -> Self {
         let mut memory_set = Self::new_bare();
@@ -287,6 +296,7 @@ impl MemorySet {
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize, usize, Vec<AuxHeader>) {
         let mut memory_set = Self::new_bare();
         // map trampoline
+        memory_set.map_sigreturn_trampoline();
         memory_set.map_trampoline();
         // map program headers of elf, with U flag
         let elf = xmas_elf::ElfFile::new(elf_data).unwrap();
@@ -391,6 +401,7 @@ impl MemorySet {
     pub fn from_existed_user(user_space: &MemorySet) -> MemorySet {
         let mut memory_set = Self::new_bare();
         // map trampoline
+        memory_set.map_sigreturn_trampoline();
         memory_set.map_trampoline();
         // copy data sections/trap_context/user_stack
         for area in user_space.areas.iter() {
@@ -533,6 +544,10 @@ impl MemorySet {
             return area.map(&mut self.page_table);
         }
     }
+
+    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+    //     self.page_table.set_pte_flags(vpn, flags)
+    // }
 }
 
 pub struct MapArea {

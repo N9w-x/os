@@ -6,9 +6,8 @@ pub use memory_set::{AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, Memo
 pub use memory_set::{kernel_token, remap_test};
 pub use page_table::{
     PageTable, PageTableEntry, translated_byte_buffer, translated_ref, translated_refmut,
-    translated_str, UserBuffer, UserBufferIterator,
+    translated_str, UserBuffer, UserBufferIterator, PTEFlags,
 };
-use page_table::PTEFlags;
 
 mod address;
 mod frame_allocator;

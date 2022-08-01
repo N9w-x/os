@@ -50,20 +50,12 @@ impl WorkPath {
     }
 
     pub fn is_abs_path(path: &str) -> bool {
-        if path.contains("^/") {
-            true
-        } else {
-            false
-        }
+        path.starts_with("/")
     }
 }
 
 impl Display for WorkPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        let mut path = String::new();
-        for path_part in self.path.iter() {
-            path.push_str(path_part.as_str());
-        }
-        write!(f, "{}", path)
+        write!(f, "{}", self.path.join(""))
     }
 }

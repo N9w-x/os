@@ -166,6 +166,18 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
+    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+    //     if let Some(pte) = self.find_pte(vpn) {
+    //         if !pte.is_valid() {
+    //             return false;
+    //         }
+    //         pte.bits = pte.ppn().0 << 10 
+    //             | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
+    //             true
+    //     } else {
+    //         false
+    //     }
+    // }
 }
 
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {

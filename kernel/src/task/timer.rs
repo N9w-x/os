@@ -11,6 +11,9 @@ use crate::{
 
 use super::{pid2process, Signum};
 
+pub const UTIME_NOW: usize = (1 << 30) - 1;
+pub const UTIME_OMIT: usize = (1 << 30) - 2;
+
 #[derive(Copy, Clone, Debug)]
 pub struct TimeVal {
     pub tv_sec: usize,
@@ -129,7 +132,10 @@ impl ITimerManager {
                 if let Some(process) = pid2process(iter.1) {
                     // Add SIGALRM.
                     // println!("[debug] Add SIGALRM to process");
-                    process.inner_exclusive_access().signals |= Signum::SIGALRM;
+                    // 向主线程发送signal
+                    let process_inner = process.inner_exclusive_access();
+                    let task = process_inner.tasks[0].as_ref().unwrap();
+                    task.inner_exclusive_access().signals |= Signum::SIGALRM;
                     let it_interval = process.inner_exclusive_access().itimer.it_interval;
                     if !it_interval.is_zero() {
                         // it_interval 不为0，则重新计时
