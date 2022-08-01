@@ -138,6 +138,10 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         }
     }
     
+    if !args_vec.contains(&path) {
+        args_vec.insert(0, path.clone())
+    }
+    
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
@@ -167,7 +171,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             ) {
                 let all_data = app_inode.read_all();
                 process.exec(&all_data, args_vec);
-                
+    
                 // return argc because cx.x[10] will be covered with it later
                 0
             } else {
