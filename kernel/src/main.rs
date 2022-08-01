@@ -12,6 +12,8 @@ extern crate alloc;
 extern crate bitflags;
 
 use lazy_static::*;
+use riscv::register::mstatus::set_fs;
+use riscv::register::sstatus::{FS, Sstatus};
 
 use sync::UPIntrFreeCell;
 
@@ -71,6 +73,9 @@ pub fn rust_main() -> ! {
         sbi::hart_suspend(0x0, wait_core as usize);
         loop {}
     } else {
+        unsafe {
+            riscv::register::sstatus::set_fs(FS::Clean);
+        };
         clear_bss();
         mm::init();
         {

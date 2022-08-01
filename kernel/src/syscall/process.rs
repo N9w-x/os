@@ -4,17 +4,18 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED, FD_MAX, RLIMIT_FSIZE, RLIMIT_NOFILE};
+use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
+use crate::config::{CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE};
 use crate::console::{ERROR, INFO, WARNING};
 use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::{
-    align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer, VirtPageNum, PTEFlags, VirtAddr,
+    align_up, PTEFlags, translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer, VirtAddr, VirtPageNum,
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
-    pid2process, suspend_current_and_run_next, CloneFlag, ITimerVal, SigAction, SigInfo, Signum,
-    TimeSpec, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK, SIG_SETMASK, SIG_UNBLOCK, tid2task, UContext, ClearChildTid,
+    add_task, ClearChildTid, CloneFlag, current_process, current_task,
+    current_user_token, exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, MAX_SIG, pid2process, SIG_BLOCK,
+    SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, tid2task, TimeSpec, UContext,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use crate::trap::lazy_check;

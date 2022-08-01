@@ -14,8 +14,8 @@ use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
 use crate::syscall::syscall;
 use crate::task::{
     check_signals_of_current, current_add_signal, current_process, current_task, current_trap_cx,
-    current_trap_cx_user_va, current_user_token, exit_current_and_run_next, handle_signals, suspend_current_and_run_next, SaFlags, Signum,
-    ITIMER_MANAGER,
+    current_trap_cx_user_va, current_user_token, exit_current_and_run_next, handle_signals,
+    ITIMER_MANAGER, SaFlags, Signum, suspend_current_and_run_next,
 };
 use crate::timer::{check_timer, set_next_trigger};
 
@@ -116,23 +116,30 @@ pub fn trap_handler() -> ! {
             //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
             //}
             // if !lazy_check(stval) {
-                println!(
-                    "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
-                    scause.cause(),
-                    stval,
-                    current_trap_cx().sepc
-                );
-                current_add_signal(Signum::SIGSEGV);
+            println!(
+                "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
+                scause.cause(),
+                stval,
+                current_trap_cx().sepc
+            );
+            current_add_signal(Signum::SIGSEGV);
             // }
             let process = current_process();
             println!("this is mmap areas:");
-            process.inner_exclusive_access().memory_set.print_mmap_area();
+            process
+                .inner_exclusive_access()
+                .memory_set
+                .print_mmap_area();
             unsafe {
                 asm!("sfence.vma");
                 asm!("fence.i");
             }
         }
         Trap::Exception(Exception::IllegalInstruction) => {
+            println!(
+                "[illegal instruction] bad inst = {:#x}",
+                current_trap_cx().sepc
+            );
             current_add_signal(Signum::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {

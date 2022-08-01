@@ -215,8 +215,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         501 => panic!("shut down"),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
-            let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
-            println!("{}", log);
+            //let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
+            //println!("{}", log);
             0
         } //_ => 0,
     }
