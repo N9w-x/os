@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use lazy_static::*;
 
+pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 pub use context::TaskContext;
 pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
 pub use info::CloneFlag;
@@ -21,6 +22,7 @@ use crate::config::PAGE_SIZE;
 use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
 use crate::mm::{add_free, UserBuffer};
 
+mod cache;
 mod context;
 mod id;
 mod info;

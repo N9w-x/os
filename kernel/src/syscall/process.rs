@@ -14,8 +14,9 @@ use crate::mm::{
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
     add_task, CloneFlag, current_process, current_task, current_user_token,
-    exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, MAX_SIG, pid2process, SIG_BLOCK, SIG_SETMASK,
-    SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, TimeSpec,
+    ENTRY_STATIC_DATA, exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, MAX_SIG, pid2process, SIG_BLOCK,
+    SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, TEST_SH_DATA,
+    TimeSpec,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use crate::trap::lazy_check;
@@ -136,31 +137,43 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-
+    
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
         .work_path
         .to_string();
-    if let Some(app_inode) = open_file(
-        &work_path,
-        path.as_str(),
-        OpenFlags::RDONLY,
-        FileType::Regular,
-    ) {
-        let all_data = app_inode.read_all();
-        let process = current_process();
-        let pid = process.getpid();
-        // println!(
-        //     "{}",
-        //     color!(format!("[exec] pid: {}, name: {}", pid, path), INFO)
-        // );
-        let argc = args_vec.len();
-        process.exec(all_data.as_slice(), args_vec);
-        // return argc because cx.x[10] will be covered with it later
-        0
-    } else {
-        -1
+    
+    let process = current_process();
+    match path.as_str() {
+        "runtest.exe" => {
+            let data_lock = TEST_SH_DATA.exclusive_access();
+            let data = data_lock.as_slice();
+            process.exec(data, args_vec);
+            0
+        }
+        "entry-static.exe" => {
+            let data_lock = ENTRY_STATIC_DATA.exclusive_access();
+            let data = data_lock.as_slice();
+            process.exec(data, args_vec);
+            0
+        }
+        _ => {
+            if let Some(app_inode) = open_file(
+                &work_path,
+                path.as_str(),
+                OpenFlags::RDONLY,
+                FileType::Regular,
+            ) {
+                let all_data = app_inode.read_all();
+                process.exec(&all_data, args_vec);
+                
+                // return argc because cx.x[10] will be covered with it later
+                0
+            } else {
+                -1
+            }
+        }
     }
 }
 
