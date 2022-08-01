@@ -32,8 +32,8 @@ impl OSInode {
         Self {
             readable,
             writable,
-            inner: Mutex::new(OsInodeInner { 
-                offset: 0, 
+            inner: Mutex::new(OsInodeInner {
+                offset: 0,
                 atime: 0,
                 mtime: 0,
                 inode,
@@ -57,15 +57,40 @@ impl OSInode {
             inner.offset += size;
             vec.extend_from_slice(&buf[..size]);
         }
-
+    
         vec
     }
-
+    
+    pub fn read_all_with_out(&self) -> Vec<u8> {
+        let mut inner = self.inner.lock();
+        let mut buf = [0u8; BLOCK_SZ];
+        //通过预分配内存空间减少拷贝次数
+        let file_size = inner.inode.get_size();
+        let mut vec = Vec::with_capacity(file_size as usize);
+        let mut block_count = 0;
+        
+        loop {
+            //分块读取文件内容
+            let size = inner.inode.read_at(inner.offset, &mut buf);
+            if size == 0 {
+                break;
+            }
+            if block_count % 200 == 0 {
+                println!("read 200 block!");
+            }
+            block_count += 1;
+            inner.offset += size;
+            vec.extend_from_slice(&buf[..size]);
+        }
+        
+        vec
+    }
+    
     pub fn is_dir(&self) -> bool {
         let inner = self.inner.lock();
         inner.inode.is_dir()
     }
-
+    
     pub fn clear(&self) {
         let inner = self.inner.lock();
         inner.inode.clear()

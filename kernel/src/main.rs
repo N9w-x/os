@@ -3,7 +3,6 @@
 #![allow(unused)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
-#![feature(bool_to_option)]
 
 extern crate alloc;
 #[macro_use]
@@ -72,12 +71,11 @@ pub fn rust_main() -> ! {
         clear_bss();
         mm::init();
         {
-            let data_lock = TEST_SH_DATA.exclusive_access();
-            data_lock.as_slice();
             let data_lock = ENTRY_STATIC_DATA.exclusive_access();
             data_lock.as_slice();
         }
         trap::init();
+        println!("trap init success");
         trap::enable_timer_interrupt();
         timer::set_next_trigger();
         board::device_init();
