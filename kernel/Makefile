@@ -176,4 +176,4 @@ handin-qemu: env kernel-pull
 	@cp $(BOOTLOADER) ../sbi-qemu
 	@cp $(KERNEL_ELF) $(HANDIN_ELF)
 
-.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull user-apps handin-k210
+.PHONY: build env kernel clean disasm disasm-vim run-inner switch-check fs-img gdbserver gdbclient img-lite build-pull user-apps handin-k210 handin-qemu
