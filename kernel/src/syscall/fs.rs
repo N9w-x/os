@@ -56,9 +56,6 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         }
         // release current task TCB manually to avoid multi-borrow
         let ret = file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize;
-        if fd > 2 {
-            println!("[read] fd: {}, len: {}, ret: {}", fd, len, ret);
-        }
         ret
     } else {
         -1
@@ -314,7 +311,6 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     };
 
     os_inode.get_fstat(&mut kstat);
-    eprintln!("kstat = {:?}", kstat);
     user_buf.write(kstat.as_bytes());
     0
 }

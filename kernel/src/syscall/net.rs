@@ -33,14 +33,14 @@ pub fn sys_sendto(sockfd: isize, buf: *const u8, len: usize , flags: isize , des
         }
     }
 
-    println!(
-        "sys_sendto(sockfd: {:#x?}, buf = ..., len:{}, flags={}, dest_addr={}, addrlen={} = 1 ---- fake",
-        sockfd,
-        len,
-        flags,
-        dest_addr,
-        addrlen
-    );
+    // println!(
+    //     "sys_sendto(sockfd: {:#x?}, buf = ..., len:{}, flags={}, dest_addr={}, addrlen={} = 1 ---- fake",
+    //     sockfd,
+    //     len,
+    //     flags,
+    //     dest_addr,
+    //     addrlen
+    // );
     write_size
 }
 

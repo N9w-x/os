@@ -125,7 +125,7 @@ pub fn trap_handler() -> ! {
                 current_add_signal(Signum::SIGSEGV);
             // }
             let process = current_process();
-            println!("this is mmap areas:");
+            // println!("this is mmap areas:");
             process.inner_exclusive_access().memory_set.print_mmap_area();
             unsafe {
                 asm!("sfence.vma");
