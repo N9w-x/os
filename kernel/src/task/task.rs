@@ -30,6 +30,13 @@ pub struct TaskControlBlockInner {
     pub task_cx: TaskContext,
     pub task_status: TaskStatus,
     pub exit_code: Option<i32>,
+    pub clear_child_tid: Option<ClearChildTid>,
+}
+
+#[derive(Debug)]
+pub struct ClearChildTid {
+    pub ctid: u32,
+    pub addr: usize,
 }
 
 impl TaskControlBlockInner {
@@ -40,6 +47,10 @@ impl TaskControlBlockInner {
     #[allow(unused)]
     fn get_status(&self) -> TaskStatus {
         self.task_status
+    }
+
+    pub fn gettid(&self) -> usize {
+        self.res.as_ref().unwrap().tid
     }
 }
 
@@ -63,6 +74,7 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    clear_child_tid: None,
                 })
             },
         }

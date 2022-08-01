@@ -91,16 +91,16 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, ctid: usize, tls: 
     let mut child_inner = child_pcb.inner_exclusive_access();
     let child_pid = child_pcb.getpid();
     let parent_pid = pcb.getpid();
-    println!(
-        "{}",
-        color!(
-            format!(
-                "[fork] parent pid: {}, child pid: {}",
-                parent_pid, child_pid
-            ),
-            INFO
-        )
-    );
+    // println!(
+    //     "{}",
+    //     color!(
+    //         format!(
+    //             "[fork] parent pid: {}, child pid: {}",
+    //             parent_pid, child_pid
+    //         ),
+    //         INFO
+    //     )
+    // );
     if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         return -1;
     }
@@ -151,10 +151,10 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let all_data = app_inode.read_all();
         let process = current_process();
         let pid = process.getpid();
-        println!(
-            "{}",
-            color!(format!("[exec] pid: {}, name: {}", pid, path), INFO)
-        );
+        // println!(
+        //     "{}",
+        //     color!(format!("[exec] pid: {}, name: {}", pid, path), INFO)
+        // );
         let argc = args_vec.len();
         process.exec(all_data.as_slice(), args_vec);
         // return argc because cx.x[10] will be covered with it later
@@ -339,11 +339,17 @@ pub fn sys_get_euid() -> isize {
 }
 
 pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
-    current_process()
-        .inner_exclusive_access()
-        .tid_attr
-        .clear_child_tid = tid_ptr;
-    sys_gettid()
+    let token = current_user_token();
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+
+    let ctid = if let Some(p) = &task_inner.clear_child_tid {
+        p.ctid
+    } else {
+        0
+    };
+    *translated_refmut(token, tid_ptr as *mut u32) = ctid;
+    task_inner.gettid() as isize
 }
 
 pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isize {

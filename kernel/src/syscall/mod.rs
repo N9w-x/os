@@ -10,6 +10,7 @@ use net::*;
 
 use crate::console::{ERROR, INFO};
 use crate::const_def;
+use crate::task::TimeSpec;
 
 const SYSCALL_LINK_AT: usize = 37;
 const SYSCALL_UNLINK_AT: usize = 35;
@@ -69,10 +70,14 @@ const SYSCALL_PRLIMIT64: usize = 261;
 const SYSCALL_SENDTO: usize = 206;
 const SYSCALL_RECVFROM: usize = 207;
 const SYSCALL_STATFS: usize = 43;
+const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_READV: usize = 65;
+const_def!(SYSCALL_WRITEV, 66);
+const SYSCALL_PREAD64: usize = 67;
 
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
-const SYSCALL_SET_TID_ADDRESS: usize = 96;
+const SYSCALL_UTIMENSAT: usize = 88;
 const SYSCALL_GET_UID: usize = 174;
 
 const SYSCALL_NEW_FSTATAT: usize = 79;
@@ -84,7 +89,6 @@ const SYSCALL_IOCTL: usize = 29;
 const SYSCALL_FCNTL: usize = 25;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
-const_def!(SYSCALL_WRITEV, 66);
 const_def!(SYSCALL_GET_TID, 178);
 
 // not standard sys call
@@ -140,9 +144,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
-        SYSCALL_GET_DENTS64 => {
-            sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize)
-        }
+        SYSCALL_GET_DENTS64 => sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize),
         SYSCALL_LINK_AT => 0,
         SYSCALL_UNLINK_AT => sys_unlink(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_MKDIR_AT => sys_mkdir(args[0] as isize, args[1] as *const u8, args[2] as u32),
@@ -171,6 +173,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         ),
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
+        SYSCALL_READV => sys_readv(args[0], args[1], args[2]),
+        SYSCALL_UTIMENSAT => sys_utimensat(args[0] as isize, args[1] as *const u8, args[2] as *const TimeSpec, args[3] as isize),
         SYSCALL_PRLIMIT64 => sys_prlimit(args[0], args[1], args[2] as *const RLimit64, args[3] as *mut RLimit64),
         //SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as usize),
@@ -195,6 +199,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[5],
         ),
         SYSCALL_STATFS => sys_statfs(args[0] as _, args[1] as _),
+        SYSCALL_IOCTL => 0,
+        SYSCALL_PREAD64 => sys_pread64(args[0], args[1] as *mut u8, args[2], args[3]),
         SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {

@@ -22,6 +22,8 @@ pub struct OSInode {
 
 pub struct OsInodeInner {
     offset: usize,
+    atime: u64,
+    mtime: u64,
     inode: Arc<VFile>,
 }
 
@@ -30,7 +32,12 @@ impl OSInode {
         Self {
             readable,
             writable,
-            inner: Mutex::new(OsInodeInner { offset: 0, inode }),
+            inner: Mutex::new(OsInodeInner { 
+                offset: 0, 
+                atime: 0,
+                mtime: 0,
+                inode,
+            }),
         }
     }
 
@@ -74,6 +81,26 @@ impl OSInode {
 
     pub fn set_offset(&self, offset: usize) {
         self.inner.lock().offset = offset;
+    }
+
+    pub fn get_offset(&self) -> usize {
+        self.inner.lock().offset
+    }
+
+    pub fn set_modification_time(&self, mtime: u64) {
+        self.inner.lock().mtime = mtime;
+    }
+
+    pub fn modification_time(&self) -> u64 {
+        self.inner.lock().mtime
+    }
+
+    pub fn set_accessed_time(&self, atime: u64) {
+        self.inner.lock().atime = atime;
+    }
+
+    pub fn accessed_time(&self) -> u64 {
+        self.inner.lock().atime
     }
 
     //在当前目录下创建文件

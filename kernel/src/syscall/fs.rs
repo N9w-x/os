@@ -16,9 +16,10 @@ use crate::fs_fat::{
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
-use crate::task::{current_process, current_task, current_user_token};
+use crate::task::{current_process, current_task, current_user_token, TimeSpec};
+use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
-use super::errno::{EPERM, EMFILE};
+use super::errno::{EPERM, EMFILE, ESPIPE, EBADF, ENOENT};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
@@ -396,15 +397,17 @@ pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
     let pcb = current_process();
     let inner = pcb.inner_exclusive_access();
     
-    if fd >= inner.fd_table.len() || inner.fd_table[fd].is_none() {
-        return -1;
+    if fd >= inner.fd_table.len() {
+        return -EPERM;
     }
+
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
     let mut write_size = 0;
-    if let Some(file) = &inner.fd_table[fd] {
+    if let Some(file) = &fd_table[fd] {
         if !file.writable() {
-            return -1;
+            return -EPERM;
         }
-    
         for i in 0..iov_cnt {
             let iov_ref = translated_ref(
                 token,
@@ -415,8 +418,157 @@ pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
             });
             write_size += file.write(buf);
         }
+    } else {
+        return -EPERM;
     }
     write_size as isize
+}
+
+pub fn sys_readv(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
+    let token = current_user_token();
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
+    let mut ret = 0isize;
+    if let Some(file) = &fd_table[fd] {
+        let f: Arc<dyn File + Send + Sync>;
+        match file {
+            FileDescriptor::Regular(os_inode) => f = os_inode.clone(),
+            FileDescriptor::Abstract(os_inode) => f = os_inode.clone(),
+        }
+        if !f.readable() {
+            return -EPERM;
+        }
+        for i in 0..iov_cnt {
+            let iovec = translated_ref(token, (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec,);
+            let buf = translated_byte_buffer(token, iovec.base, iovec.len);
+            ret += f.read(UserBuffer::new(buf)) as isize;
+        }
+    } else {
+        return -EPERM;
+    }
+    ret
+}
+
+pub fn sys_utimensat(
+    dirfd: isize,
+    ppath: *const u8,
+    times: *const TimeSpec,
+    _flags: isize,
+) -> isize {
+    let process = current_process();
+    let token = current_user_token();
+    let path = if ppath as usize != 0 {
+        translated_str(token, ppath)
+    } else {
+        String::from(".")
+    };
+    let p = process.inner_exclusive_access().work_path.to_string();
+    let mut base_path = p.as_str();
+    // 如果path是绝对路径，则dirfd被忽略
+    if path.starts_with("/") {
+        base_path = "/";
+    } else if dirfd != AT_FD_CWD {
+        let dirfd = dirfd as usize;
+        if dirfd >= process.inner_exclusive_access().fd_table.len() {
+            println!(
+                "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+                dirfd,
+                path,
+                -EBADF
+            );
+            return -EBADF;
+        }
+        let fd_table = process.inner_exclusive_access().fd_table.clone();
+        if let Some(FileDescriptor::Regular(osfile)) = fd_table[dirfd].clone() {
+            if ppath as usize == 0 {
+                do_utimensat(osfile, times, token);
+                println!(
+                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+                    dirfd,
+                    path,
+                    0
+                );
+                return 0;
+            } else if let Some(f) = osfile.find(path.as_str(), OpenFlags::empty()) {
+                do_utimensat(f, times, token);
+                println!(
+                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+                    dirfd,
+                    path,
+                    0
+                );
+                return 0;
+            }
+        }
+        println!(
+            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+            dirfd,
+            path,
+            -ENOENT
+        );
+        return -ENOENT;
+    }
+    if let Some(f) = open_file(base_path, path.as_str(), OpenFlags::empty(), FileType::Regular) {
+        do_utimensat(f, times, token);
+        println!(
+            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+            dirfd,
+            path,
+            0
+        );
+        return 0;
+    }
+    println!(
+        "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
+        dirfd,
+        path,
+        -ENOENT
+    );
+    return -ENOENT;
+}
+
+fn do_utimensat(file: Arc<OSInode>, times: *const TimeSpec, token: usize) {
+    let curtime = (get_time_ns() / NSEC_PER_SEC) as u64;
+    if times as usize == 0 {
+        file.set_accessed_time(curtime);
+        file.set_modification_time(curtime);
+    } else {
+        let atime_ts = translated_ref(token, times);
+        match atime_ts.tv_nsec {
+            UTIME_NOW => file.set_accessed_time(curtime),
+            UTIME_OMIT => (),
+            _ => file.set_accessed_time(atime_ts.tv_sec as u64),
+        };
+        let mtime_ts = translated_ref(token, unsafe { times.add(1) });
+        match mtime_ts.tv_nsec {
+            UTIME_NOW => file.set_modification_time(curtime),
+            UTIME_OMIT => (),
+            _ => file.set_modification_time(mtime_ts.tv_sec as u64),
+        };
+    }
+}
+
+pub fn sys_pread64(fd: usize, buf: *mut u8, count: usize, offset: usize) -> isize {
+    let token = current_user_token();
+    let process = current_process();
+    let fd_table = process.inner_exclusive_access().fd_table.clone();
+    if let Some(Some(f)) = fd_table.get(fd) {
+        match f {
+            FileDescriptor::Regular(os_inode) => {
+                let old_off = os_inode.get_offset();
+                os_inode.set_offset(offset);
+                let read_cnt = os_inode
+                    .read(UserBuffer::new(translated_byte_buffer(token, buf, count))) as isize;
+                os_inode.set_offset(old_off);
+                read_cnt
+            }
+            FileDescriptor::Abstract(_) => -ESPIPE,
+        }
+    } else {
+        -EBADF
+    }
 }
 
 pub fn sys_fs(option: usize, fs_name: usize, buf: usize) -> isize {
@@ -441,14 +593,12 @@ pub fn sys_fs(option: usize, fs_name: usize, buf: usize) -> isize {
 pub fn sys_lseek(fd: isize, offset: isize, whence: i32) -> isize {
     let pcb = current_process();
     let inner = pcb.inner_exclusive_access();
-    
-    if fd as usize >= inner.fd_table.len() {
-        return -1;
-    }
-    
-    match &inner.fd_table[fd as usize] {
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
+    match &fd_table[fd as usize] {
         Some(FileDescriptor::Regular(os_inode)) => os_inode.lseek(offset, whence),
-        _ => -1,
+        Some(FileDescriptor::Abstract(_)) => -ESPIPE,
+        _ => -EBADF,
     }
 }
 
