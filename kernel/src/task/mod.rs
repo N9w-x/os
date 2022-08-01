@@ -5,9 +5,10 @@ use lazy_static::*;
 
 pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 pub use context::TaskContext;
-pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
+pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use info::CloneFlag;
-pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process};
+pub use timer::{TimeVal, TimeSpec, ITimerVal, ITIMER_MANAGER, UTIME_NOW, UTIME_OMIT};
+pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process, tid2task, remove_from_tid2task};
 use process::ProcessControlBlock;
 pub use processor::{
     current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
@@ -15,12 +16,12 @@ pub use processor::{
 };
 pub use signal::*;
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus};
-pub use timer::{ITIMER_MANAGER, ITimerVal, TimeSpec, TimeVal};
+pub use task::{TaskControlBlock, TaskStatus, ClearChildTid};
 
 use crate::config::PAGE_SIZE;
 use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
-use crate::mm::{add_free, UserBuffer};
+use crate::mm::{add_free, UserBuffer, translated_refmut};
+use crate::sync::futex_wake;
 
 mod cache;
 mod context;
@@ -62,15 +63,38 @@ pub fn block_current_task() -> *mut TaskContext {
 }
 
 pub fn block_current_and_run_next() {
-    let task_cx_ptr = block_current_task();
+    let task = current_task().unwrap();
+    let mut inner  = task.inner_exclusive_access();
+    let task_cx_ptr = &mut inner.task_cx as *mut TaskContext;
+    inner.task_status = TaskStatus::Blocking;
+    drop(inner);
+    drop(task);
     schedule(task_cx_ptr);
 }
 
+pub fn unblock_task(task: Arc<TaskControlBlock>) {
+    let mut inner = task.inner_exclusive_access();
+    assert!(inner.task_status == TaskStatus::Blocking);
+    inner.task_status = TaskStatus::Ready;
+    drop(inner);
+    add_task(task);
+}
+
 pub fn exit_current_and_run_next(exit_code: i32) {
+    let token = current_user_token();
     let task = take_current_task().unwrap();
+    let tid = task.gettid();
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
-    let tid = task_inner.res.as_ref().unwrap().tid;
+    let id = task_inner.res.as_ref().unwrap().id;
+
+    if let Some(clear_child_tid) = &task_inner.clear_child_tid {
+        *translated_refmut(token, clear_child_tid.addr as *mut u32) = 0;
+        futex_wake(clear_child_tid.addr, 1);
+    }
+    remove_from_tid2task(tid);
+    
+
     // record exit code
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
@@ -80,7 +104,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // however, if this is the main thread of current process
     // the process should terminate at once
-    if tid == 0 {
+    if id == 0 {
         remove_from_pid2process(process.getpid());
         let mut process_inner = process.inner_exclusive_access();
         // mark this process as a zombie process
@@ -200,7 +224,7 @@ pub fn add_initproc_into_fs() {
             // println!("User_shell OK");
         }
     }
-    println!("Write apps(initproc & user_shell) to disk from mem");
+    // println!("Write apps(initproc & user_shell) to disk from mem");
 
     // release
     let mut start_ppn = app_start[0] / PAGE_SIZE + 1;
@@ -216,15 +240,21 @@ pub fn add_initproc_into_fs() {
 }
 
 pub fn check_signals_of_current() -> Option<(i32, &'static str)> {
-    let process = current_process();
-    let process_inner = process.inner_exclusive_access();
-    process_inner.signals.check_error()
+    // let process = current_process();
+    // let process_inner = process.inner_exclusive_access();
+    // process_inner.signals.check_error()
+    let task = current_task().unwrap();
+    let task_inner = task.inner_exclusive_access();
+    task_inner.signals.check_error()
 }
 
 pub fn current_add_signal(signal: Signum) {
-    let process = current_process();
-    let mut process_inner = process.inner_exclusive_access();
-    process_inner.signals |= signal;
+    // let process = current_process();
+    // let mut process_inner = process.inner_exclusive_access();
+    // process_inner.signals |= signal;
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.signals |= signal;
 }
 
 pub fn save_hart_id() {

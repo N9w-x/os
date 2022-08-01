@@ -55,7 +55,7 @@ impl Dirent {
         copy_part.copy_from_slice(bytes);
         buf
     }
-    
+
     pub fn as_bytes(&self) -> &[u8] {
         let size = core::mem::size_of::<Dirent>();
         unsafe { from_raw_parts(self as *const _ as *const u8, size) }
@@ -65,32 +65,38 @@ impl Dirent {
 bitflags! {
     pub struct VFSFlag:u32{
         //file type mask
-        const S_IFMT    = 0170_000; /*mask*/
+        const S_IFMT    = 0o170_000; /*mask*/
 
-        const S_IFSOCK  = 0140_000; /*socket file*/
-        const S_IFLNK   = 0120_000; /*link file*/
-        const S_IFREG   = 0100_000; /*regular file*/
-        const S_IFBLK   = 0060_000; /*block device*/
-        const S_IFDIR   = 0040_000; /*directory*/
-        const S_IFCHR   = 0020_000; /*char device*/
-        const S_IFIFO   = 0010_000; /*fifo*/
+        const S_IFSOCK  = 0o140_000; /*socket file*/
+        const S_IFLNK   = 0o120_000; /*link file*/
+        const S_IFREG   = 0o100_000; /*regular file*/
+        const S_IFBLK   = 0o060_000; /*block device*/
+        const S_IFDIR   = 0o040_000; /*directory*/
+        const S_IFCHR   = 0o020_000; /*char device*/
+        const S_IFIFO   = 0o010_000; /*fifo*/
 
         //file mode mask
-        const S_ISUID   = 04000; /*set uid*/
-        const S_ISGID   = 02000; /*set gid*/
-        const S_ISVTX   = 01000; /*stick bit*/
+        const S_ISUID   = 0o4000; /*set uid*/
+        const S_ISGID   = 0o2000; /*set gid*/
+        const S_ISVTX   = 0o1000; /*stick bit*/
 
         //use
-        const S_IRWXU   = 00700; /*read write execute*/
-        const S_IRUSR   = 00400; /*read*/
-        const S_IWUSR   = 00200; /*write*/
-        const S_IXUSR   = 00100; /*exec*/
+        const S_IRWXU   = 0o0700; /*read write execute*/
+        const S_IRUSR   = 0o0400; /*read*/
+        const S_IWUSR   = 0o0200; /*write*/
+        const S_IXUSR   = 0o0100; /*exec*/
 
         //group
         const S_IRWXG   = 00070; /**/
         const S_IRGRP   = 00040;
         const S_IWGRP   = 00020;
         const S_IXGRP   = 00010;
+
+        const S_IRWXO   = 0o0007; //others (not in group) have read, write,and execute permission
+        const S_IROTH   = 0o0004; //others have read permission
+        const S_IWOTH   = 0o0002; //others have write permission
+        const S_IXOTH   = 0o0001; //others have execute permission
+        
     }
 }
 
@@ -101,29 +107,29 @@ impl VFSFlag {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct Kstat {
-    st_dev: u64,
-    /* ID of device containing file */
-    st_ino: u64,
+    pub st_dev: u64,
     /* Inode number */
-    st_mode: u32,
+    pub st_ino: u64,
     /* File type and mode */
-    st_nlink: u32,
+    pub st_mode: u32,
     /* Number of hard links */
-    st_uid: u32,
-    st_gid: u32,
-    st_rdev: u64,
-    __pad: u64,
-    st_size: u32,
-    st_blksize: u32,
-    __pad2: i32,
-    st_blocks: u64,
-    st_atime_sec: i64,
-    st_atime_nsec: i64,
-    st_mtime_sec: i64,
-    st_mtime_nsec: i64,
-    st_ctime_sec: i64,
-    st_ctime_nsec: i64,
+    pub st_nlink: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub st_rdev: u64,
+    pub __pad: u64,
+    pub st_size: i64,
+    pub st_blksize: u32,
+    pub __pad2: u32,
+    pub st_blocks: u64,
+    pub st_atime_sec: i64,
+    pub st_atime_nsec: i64,
+    pub st_mtime_sec: i64,
+    pub st_mtime_nsec: i64,
+    pub st_ctime_sec: i64,
+    pub st_ctime_nsec: i64,
 }
 
 impl Default for Kstat {
@@ -157,7 +163,7 @@ impl Kstat {
         &mut self,
         st_ino: u64,
         st_mode: u32,
-        st_size: u32,
+        st_size: i64,
         access_time: i64,
         modify_time: i64,
         create_time: i64,
@@ -172,7 +178,7 @@ impl Kstat {
             ..*self
         }
     }
-    
+
     pub fn as_bytes(&self) -> &[u8] {
         let size = core::mem::size_of::<Self>();
         unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, size) }

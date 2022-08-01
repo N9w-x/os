@@ -43,13 +43,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
 }
 
 pub fn sys_gettid() -> isize {
-    current_task()
-        .unwrap()
-        .inner_exclusive_access()
-        .res
-        .as_ref()
-        .unwrap()
-        .tid as isize
+    current_task().unwrap().gettid() as isize
 }
 
 /// thread does not exist, return -1
@@ -58,10 +52,9 @@ pub fn sys_gettid() -> isize {
 pub fn sys_waittid(tid: usize) -> i32 {
     let task = current_task().unwrap();
     let process = task.process.upgrade().unwrap();
-    let task_inner = task.inner_exclusive_access();
     let mut process_inner = process.inner_exclusive_access();
     // a thread cannot wait for itself
-    if task_inner.res.as_ref().unwrap().tid == tid {
+    if task.gettid() == tid {
         return -1;
     }
     let mut exit_code: Option<i32> = None;

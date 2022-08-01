@@ -6,8 +6,8 @@ use core::any::Any;
 use fat32::VFile;
 
 pub use file_descriptor::FileDescriptor;
-pub use fs_info::{Dirent, Kstat};
-pub use inode::{ch_dir, list_apps, open_file};
+pub use fs_info::{Dirent, Kstat, VFSFlag};
+pub use inode::{ch_dir, list_apps, open_file, init_rootfs};
 pub use inode::{FileType, OpenFlags, OSInode};
 pub use io_vec::IOVec;
 pub use path::WorkPath;
@@ -26,11 +26,16 @@ mod path;
 mod pipe;
 mod stdio;
 
+pub const AT_FD_CWD: isize = -100;
+
 pub trait File: Send + Sync {
     fn readable(&self) -> bool;
     fn writable(&self) -> bool;
     fn read(&self, buf: UserBuffer) -> usize;
     fn write(&self, buf: UserBuffer) -> usize;
+    fn ioctl(&self, cmd: usize) -> isize {
+        0
+    }
 }
 
 pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {

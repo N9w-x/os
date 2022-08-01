@@ -11,12 +11,12 @@ use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use crate::console::INFO;
 use crate::fs_fat::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
-    open_file, OpenFlags, OSInode, WorkPath,
+    open_file, OpenFlags, OSInode, WorkPath, AT_FD_CWD, VFSFlag,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
-use crate::task::{current_process, current_task, current_user_token, TimeSpec};
+use crate::task::{current_process, current_task, current_user_token, TimeSpec, UTIME_NOW, UTIME_OMIT};
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
 use super::errno::{EPERM, EMFILE, ESPIPE, EBADF, ENOENT};
@@ -46,16 +46,20 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
     let process = current_process();
     let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return -EPERM;
     }
-    if let Some(file) = &inner.fd_table[fd] {
-        let file = file.clone();
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
+    if let Some(file) = &fd_table[fd] {
         if !file.readable() {
-            return -1;
+            return -EPERM;
         }
         // release current task TCB manually to avoid multi-borrow
-        drop(inner);
-        file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+        let ret = file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize;
+        if fd > 2 {
+            println!("[read] fd: {}, len: {}, ret: {}", fd, len, ret);
+        }
+        ret
     } else {
         -1
     }
@@ -92,10 +96,10 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
                     os_inode.find(&path, flags)
                 }
             }
-            _ => return -1,
+            _ => return -EPERM,
         }
     } {
-        None => -EMFILE,
+        None => -ENOENT,
         Some(os_inode) => {
             //alloc fd and push into fd table
             let mut inner = process.inner_exclusive_access();
@@ -177,8 +181,6 @@ pub fn sys_chdir(path: *const u8) -> isize {
     }
     ret
 }
-
-pub const AT_FD_CWD: isize = -100;
 
 pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
@@ -312,6 +314,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     };
 
     os_inode.get_fstat(&mut kstat);
+    eprintln!("kstat = {:?}", kstat);
     user_buf.write(kstat.as_bytes());
     0
 }
@@ -329,11 +332,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     } else {
         let fd_usize = fd as usize;
         let mut inner = pcb.inner_exclusive_access();
-    
+
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-    
+
         match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
             _ => return -1,
@@ -358,7 +361,17 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         buf,
         core::mem::size_of::<Kstat>(),
     ));
-    
+
+    // TODO 增加/dev/null文件
+    if path == "/dev/null" {
+        let mut kstat = Kstat {
+            st_mode: (VFSFlag::S_IFCHR).bits(),
+            ..Kstat::default()
+        };
+        user_buf.write(kstat.as_bytes());
+        return 0;
+    }
+
     return match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDONLY, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -370,20 +383,24 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-        
-        match &inner.fd_table[fd_usize] {
+
+        return match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => {
                 let mut kstat = Kstat::default();
                 os_inode.get_fstat(&mut kstat);
                 user_buf.write(kstat.as_bytes());
-                return 0;
+                0
             }
-            _ => return -1,
+            _ => -1,
         }
     } {
         Some(os_inode) => {
             let mut kstat = Kstat::default();
             os_inode.get_fstat(&mut kstat);
+            // TODO 不知道为什么有的文件的sec超级大
+            kstat.st_atime_sec = 0;
+            kstat.st_mtime_sec = 0;
+            kstat.st_ctime_sec = 0;
             user_buf.write(kstat.as_bytes());
             0
         }
@@ -391,12 +408,58 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
     };
 }
 
+// pub fn sys_utimensat(dirfd: isize, path: *const u8, time: *const usize, flags: u32) -> isize {
+//     // futimens等同于utimensat(fd, NULL, times, 0);
+
+//     // 不使用当前工作路径，且没有提供新的路径
+//     if path as usize == 0 && dirfd != AT_FD_CWD {
+//         return -1;
+//     }
+//     let time = time as *const [TimeSpec; 2];
+
+//     let process = current_process();
+//     let mut inner = process.inner_exclusive_access();
+//     let token = inner.get_user_token();
+//     let path = translated_str(token, path);
+
+//     let [last_access_time, last_modify_time] = translated_ref(token, time);
+
+//     let work_path = inner.work_path.to_string();
+//     let flags = OpenFlags::from_bits(flags).unwrap();
+
+//     if let Some(file) = inner.open_file(dirfd, path, flags) {
+//         let mut stat = Kstat::default();
+//         file.get_fstat(&mut stat);
+//         eprintln!("stat = {:?}", stat);
+//         0
+//     } else {
+//         -1
+//     }
+// }
+
+pub fn sys_ioctl(fd: usize, cmd: usize) -> isize {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+
+    if fd as usize >= inner.fd_table.len() {
+        return -1;
+    }
+
+    if let Some(descriptor) = &inner.fd_table[fd] {
+        let file = descriptor.clone();
+        drop(inner);
+        file.ioctl(cmd)
+    } else {
+        -1
+    }
+}
+
 // 因为这里不会有AT_FD_CWD这种情况,所以fd类型为usize
 pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let inner = pcb.inner_exclusive_access();
-    
+
     if fd >= inner.fd_table.len() {
         return -EPERM;
     }
@@ -466,66 +529,30 @@ pub fn sys_utimensat(
     };
     let p = process.inner_exclusive_access().work_path.to_string();
     let mut base_path = p.as_str();
-    // 如果path是绝对路径，则dirfd被忽略
+
     if path.starts_with("/") {
         base_path = "/";
     } else if dirfd != AT_FD_CWD {
         let dirfd = dirfd as usize;
         if dirfd >= process.inner_exclusive_access().fd_table.len() {
-            println!(
-                "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                dirfd,
-                path,
-                -EBADF
-            );
             return -EBADF;
         }
         let fd_table = process.inner_exclusive_access().fd_table.clone();
         if let Some(FileDescriptor::Regular(osfile)) = fd_table[dirfd].clone() {
             if ppath as usize == 0 {
                 do_utimensat(osfile, times, token);
-                println!(
-                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                    dirfd,
-                    path,
-                    0
-                );
                 return 0;
             } else if let Some(f) = osfile.find(path.as_str(), OpenFlags::empty()) {
                 do_utimensat(f, times, token);
-                println!(
-                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                    dirfd,
-                    path,
-                    0
-                );
                 return 0;
             }
         }
-        println!(
-            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-            dirfd,
-            path,
-            -ENOENT
-        );
         return -ENOENT;
     }
     if let Some(f) = open_file(base_path, path.as_str(), OpenFlags::empty(), FileType::Regular) {
         do_utimensat(f, times, token);
-        println!(
-            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-            dirfd,
-            path,
-            0
-        );
         return 0;
     }
-    println!(
-        "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-        dirfd,
-        path,
-        -ENOENT
-    );
     return -ENOENT;
 }
 

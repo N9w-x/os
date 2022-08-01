@@ -3,6 +3,8 @@
 #![allow(unused)]
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
+#![feature(map_try_insert)]
+#![feature(map_first_last)]
 #![feature(bool_to_option)]
 
 extern crate alloc;
@@ -81,6 +83,7 @@ pub fn rust_main() -> ! {
         timer::set_next_trigger();
         board::device_init();
         fs_fat::list_apps();
+        fs_fat::init_rootfs();
         task::add_initproc();
         *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
         println!("start run tasks");
