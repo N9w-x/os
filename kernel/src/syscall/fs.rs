@@ -46,16 +46,20 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
     let process = current_process();
     let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return -EPERM;
     }
-    if let Some(file) = &inner.fd_table[fd] {
-        let file = file.clone();
+    let fd_table = inner.fd_table.clone();
+    drop(inner);
+    if let Some(file) = &fd_table[fd] {
         if !file.readable() {
-            return -1;
+            return -EPERM;
         }
         // release current task TCB manually to avoid multi-borrow
-        drop(inner);
-        file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
+        let ret = file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize;
+        if fd > 2 {
+            println!("[read] fd: {}, len: {}, ret: {}", fd, len, ret);
+        }
+        ret
     } else {
         -1
     }
@@ -92,10 +96,10 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
                     os_inode.find(&path, flags)
                 }
             }
-            _ => return -1,
+            _ => return -EPERM,
         }
     } {
-        None => -EMFILE,
+        None => -ENOENT,
         Some(os_inode) => {
             //alloc fd and push into fd table
             let mut inner = process.inner_exclusive_access();
@@ -472,62 +476,29 @@ pub fn sys_utimensat(
     } else if dirfd != AT_FD_CWD {
         let dirfd = dirfd as usize;
         if dirfd >= process.inner_exclusive_access().fd_table.len() {
-            println!(
-                "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                dirfd,
-                path,
-                -EBADF
-            );
             return -EBADF;
         }
         let fd_table = process.inner_exclusive_access().fd_table.clone();
         if let Some(FileDescriptor::Regular(osfile)) = fd_table[dirfd].clone() {
             if ppath as usize == 0 {
                 do_utimensat(osfile, times, token);
-                println!(
-                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                    dirfd,
-                    path,
-                    0
-                );
                 return 0;
             } else if let Some(f) = osfile.find(path.as_str(), OpenFlags::empty()) {
                 do_utimensat(f, times, token);
-                println!(
-                    "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-                    dirfd,
-                    path,
-                    0
-                );
                 return 0;
             }
         }
-        println!(
-            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-            dirfd,
-            path,
-            -ENOENT
-        );
         return -ENOENT;
     }
     if let Some(f) = open_file(base_path, path.as_str(), OpenFlags::empty(), FileType::Regular) {
         do_utimensat(f, times, token);
-        println!(
-            "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-            dirfd,
-            path,
-            0
-        );
         return 0;
     }
-    println!(
-        "sys_utimensat(dirfd = {}, path = {:#?}) = {}",
-        dirfd,
-        path,
-        -ENOENT
-    );
     return -ENOENT;
 }
+
+const UTIME_NOW: usize = (1 << 30) - 1;
+const UTIME_OMIT: usize = (1 << 30) - 2;
 
 fn do_utimensat(file: Arc<OSInode>, times: *const TimeSpec, token: usize) {
     let curtime = (get_time_ns() / NSEC_PER_SEC) as u64;

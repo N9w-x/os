@@ -74,19 +74,17 @@ const SYSCALL_SET_TID_ADDRESS: usize = 96;
 const SYSCALL_READV: usize = 65;
 const_def!(SYSCALL_WRITEV, 66);
 const SYSCALL_PREAD64: usize = 67;
+const SYSCALL_LSEEK: usize = 62;
+const SYSCALL_NEW_FSTATAT: usize = 79;
+const SYSCALL_SIG_ACTION: usize = 134;
+const SYSCALL_SIG_PROC_MASK: usize = 135;
+const SYSCALL_FCNTL: usize = 25;
+const SYSCALL_IOCTL: usize = 29;
 
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_UTIMENSAT: usize = 88;
 const SYSCALL_GET_UID: usize = 174;
-
-const SYSCALL_NEW_FSTATAT: usize = 79;
-const SYSCALL_SIG_ACTION: usize = 134;
-const SYSCALL_SIG_PROC_MASK: usize = 135;
-
-const SYSCALL_LSEEK: usize = 62;
-const SYSCALL_IOCTL: usize = 29;
-const SYSCALL_FCNTL: usize = 25;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_GET_TID, 178);
@@ -118,7 +116,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_EXIT => sys_exit(args[0] as i32),
         SYSCALL_SLEEP => sys_sleep(args[0] as *const u64, args[1] as *mut u64),
         SYSCALL_YIELD => sys_yield(),
-        SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
+        SYSCALL_KILL => sys_kill(args[0], args[1] as u64),
         SYSCALL_GET_TIME_OF_DAY => sys_get_time_of_day(args[0] as *mut u64),
         SYSCALL_GETPID => sys_getpid(),
         SYSCALL_GET_PPID => sys_getppid(),
@@ -139,7 +137,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CONDVAR_SIGNAL => sys_condvar_signal(args[0]),
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_SIGACTION => sys_sigaction(args[0], args[1] as *mut usize, args[2] as *mut usize),
-        SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as *mut u32, args[2] as *mut u32),
+        SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as *mut u64, args[2] as *mut u64),
         //SYSCALL_SIGTIMEDWAIT => sys_sigtimedwait(args[0] as *mut u32, args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),

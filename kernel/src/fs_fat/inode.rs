@@ -1,3 +1,4 @@
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -77,6 +78,18 @@ impl OSInode {
 
     pub fn get_size(&self) -> usize {
         self.inner.lock().inode.get_size() as usize
+    }
+
+    pub fn get_name(&self) -> String {
+        String::from(self.inner.lock().inode.get_name())
+    }
+
+    pub fn get_inode_id(&self) -> u32 {
+        self.inner.lock().inode.first_cluster()
+    }
+    
+    pub fn set_inode_id(&self, inode_id: u32) {
+        self.inner.lock().inode.set_first_cluster(inode_id);
     }
 
     pub fn set_offset(&self, offset: usize) {
@@ -175,20 +188,22 @@ impl OSInode {
 
         let (size, access_t, modify_t, create_t, inode_num) = vfile.stat();
         let st_mode = {
-            if vfile.is_dir() {
-                VFSFlag::create_flag(VFSFlag::S_IFDIR, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+            if self.get_name() == "null" {
+                VFSFlag::S_IFCHR
+            } else if vfile.is_dir() {
+                VFSFlag::S_IFDIR | VFSFlag::S_IRWXU | VFSFlag::S_IRWXG | VFSFlag::S_IRWXO
             } else {
-                VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+                VFSFlag::S_IFREG | VFSFlag::S_IRWXU | VFSFlag::S_IRWXG | VFSFlag::S_IRWXO
             }
         }
         .bits();
     
         fstat.update(
-            inode_num,
+            self.get_inode_id() as u64,
             st_mode,
-            size as u32,
-            access_t,
-            modify_t,
+            self.get_size() as i64,
+            self.accessed_time() as i64,
+            self.modification_time() as i64,
             create_t,
         );
     }
@@ -295,7 +310,7 @@ bitflags! {
         const RDWR = 1 << 1;
         const CREATE = 1 << 6;
         const TRUNC = 1 << 10;
-        const DIRECTROY = 0200000;
+        const DIRECTORY = 0200000;
         const LARGEFILE  = 0100000;
         const CLOEXEC = 02000000;
     }
@@ -368,4 +383,21 @@ pub fn open_file(
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
+}
+
+pub fn init_rootfs(){
+    let _proc = open_file("/","proc", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _mounts = open_file("/proc","mounts", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _meminfo = open_file("/proc","meminfo", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _var = open_file("/","var", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _tmp = open_file("/","tmp", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _dev = open_file("/", "dev", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let _null = open_file("/dev", "null", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
+    let zero = open_file("/dev", "zero", OpenFlags::CREATE | OpenFlags::RDONLY, FileType::Regular).unwrap();
+    let _invalid = open_file("/dev/null", "invalid", OpenFlags::CREATE | OpenFlags::RDONLY, FileType::Regular).unwrap();
+    let mut buf = vec![0u8; 1];
+    let zero_write = UserBuffer::new(vec![unsafe {
+        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
+    }]);
+    zero.write(zero_write);
 }

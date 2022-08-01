@@ -4,7 +4,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED, FD_MAX, RLIMIT_FSIZE};
+use crate::config::{CLOCK_FREQ, MAP_ANONYMOUS, PAGE_SIZE, MAP_FIXED, FD_MAX, RLIMIT_FSIZE, RLIMIT_NOFILE};
 use crate::console::{ERROR, INFO, WARNING};
 use crate::fs_fat::{FileType, open_file, OpenFlags, FileDescriptor, File};
 use crate::mm::{
@@ -252,7 +252,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     // ---- release current PCB automatically
 }
 
-pub fn sys_kill(pid: usize, signal: u32) -> isize {
+pub fn sys_kill(pid: usize, signal: u64) -> isize {
     if let Some(process) = pid2process(pid) {
         if let Some(flag) = Signum::from_bits(signal) {
             process.inner_exclusive_access().signals |= flag;
@@ -387,37 +387,33 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     0
 }
 
-pub fn sys_sigprocmask(how: usize, set: *mut u32, oldset: *mut u32) -> isize {
+pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let token = inner.get_user_token();
+    let mut mask = inner.signal_masks.bits();
 
-    if oldset as usize != 0 {
-        *translated_refmut(token, oldset) = inner.signal_masks.bits();
+    if old_set as usize != 0 {
+        *translated_refmut(token, old_set) = mask;
     }
 
-    if set as usize == 0 {
-        return 0;
-    }
-    let new_mask = *translated_refmut(token, set);
-
-    if let Some(new_mask) = Signum::from_bits(new_mask) {
+    if set as usize != 0 {
+        let new_set = *translated_ref(token, set);
         match how {
             // SIG_BLOCK The set of blocked signals is the union of the current set and the set argument.
-            SIG_BLOCK => inner.signal_masks.insert(new_mask),
+            SIG_BLOCK => mask |= new_set,
             // SIG_UNBLOCK The signals in set are removed from the current set of blocked signals.
-            SIG_UNBLOCK => inner.signal_masks.remove(new_mask),
+            SIG_UNBLOCK => mask &= !new_set,
             // SIG_SETMASK The set of blocked signals is set to the argument set.
-            SIG_SETMASK => *translated_refmut(token, set) = inner.signal_masks.bits(),
+            SIG_SETMASK => mask = new_set,
             _ => return -1,
         }
-        0
-    } else {
-        -1
+        inner.signal_masks = Signum::from_bits(mask & ((1 << MAX_SIG) - 1)).unwrap();
     }
+    0
 }
 
-pub fn sys_sigtimedwait(set: *mut u32, info: *mut usize, timeout: *mut usize) -> isize {
+pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) -> isize {
     if set as usize == 0 {
         return -1;
     }

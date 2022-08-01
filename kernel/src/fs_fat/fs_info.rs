@@ -91,6 +91,12 @@ bitflags! {
         const S_IRGRP   = 00040;
         const S_IWGRP   = 00020;
         const S_IXGRP   = 00010;
+
+        const S_IRWXO   = 0o0007; //others (not in group) have read, write,and execute permission
+        const S_IROTH   = 0o0004; //others have read permission
+        const S_IWOTH   = 0o0002; //others have write permission
+        const S_IXOTH   = 0o0001; //others have execute permission
+        
     }
 }
 
@@ -114,9 +120,9 @@ pub struct Kstat {
     st_gid: u32,
     st_rdev: u64,
     __pad: u64,
-    st_size: u32,
+    st_size: i64,
     st_blksize: u32,
-    __pad2: i32,
+    __pad2: u32,
     st_blocks: u64,
     st_atime_sec: i64,
     st_atime_nsec: i64,
@@ -128,11 +134,10 @@ pub struct Kstat {
 
 impl Default for Kstat {
     fn default() -> Self {
-        let flags = VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG);
         Self {
             st_dev: 0,
             st_ino: 0,
-            st_mode: flags.bits,
+            st_mode: 0,
             st_nlink: 1,
             st_uid: 0,
             st_gid: 0,
@@ -157,7 +162,7 @@ impl Kstat {
         &mut self,
         st_ino: u64,
         st_mode: u32,
-        st_size: u32,
+        st_size: i64,
         access_time: i64,
         modify_time: i64,
         create_time: i64,

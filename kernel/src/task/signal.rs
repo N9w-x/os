@@ -15,8 +15,9 @@ pub const SIG_DFL: usize = 0; /* Default action.  */
 pub const SIG_IGN: usize = 1; /* Ignore signal.  */
 
 bitflags! {
-    pub struct Signum: u32 {
+    pub struct Signum: u64 {
         // 没有0号信号
+        const NONE = 1 << 0;
         const SIGHUP = 1 << 1;
         const SIGINT = 1 << 2;
         const SIGQUIT = 1 << 3;

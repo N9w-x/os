@@ -7,7 +7,7 @@ use fat32::VFile;
 
 pub use file_descriptor::FileDescriptor;
 pub use fs_info::{Dirent, Kstat};
-pub use inode::{ch_dir, list_apps, open_file};
+pub use inode::{ch_dir, list_apps, open_file, init_rootfs};
 pub use inode::{FileType, OpenFlags, OSInode};
 pub use io_vec::IOVec;
 pub use path::WorkPath;

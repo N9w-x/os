@@ -80,6 +80,7 @@ pub fn rust_main() -> ! {
     timer::set_next_trigger();
     board::device_init();
     fs_fat::list_apps();
+    fs_fat::init_rootfs();
     task::add_initproc();
     *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
     println!("start run tasks");
