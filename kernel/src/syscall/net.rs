@@ -1,24 +1,25 @@
+use alloc::sync::Arc;
+
+use lazy_static::*;
+
+use crate::fs::PipeRingBuffer;
 use crate::mm::{
     translated_byte_buffer, UserBuffer,
 };
-use crate::sync::UPIntrFreeCell;
-use crate::task::{current_user_token};
-use crate::fs_fat::PipeRingBuffer;
-use alloc::sync::Arc;
-use lazy_static::*;
+use crate::task::current_user_token;
 
 lazy_static! {
-    pub static ref SOCKET_BUF: Arc<UPIntrFreeCell<PipeRingBuffer>> = 
-        Arc::new(unsafe { UPIntrFreeCell::new(PipeRingBuffer::new()) });
+    pub static ref SOCKET_BUF: Arc<spin::Mutex<PipeRingBuffer>> =
+        Arc::new(unsafe { spin::Mutex::new(PipeRingBuffer::new()) });
 }
 
-pub fn sys_sendto(sockfd: isize, buf: *const u8, len: usize , flags: isize , dest_addr: usize, addrlen: usize) -> isize {
+pub fn sys_sendto(sockfd: isize, buf: *const u8, len: usize, flags: isize, dest_addr: usize, addrlen: usize) -> isize {
     let token = current_user_token();
     let userbuf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let mut buf_iter = userbuf.into_iter();
     let mut write_size = 0isize;
-
-    let mut ring_buffer = SOCKET_BUF.exclusive_access();
+    
+    let mut ring_buffer = SOCKET_BUF.lock();
     let loop_write = ring_buffer.available_write();
     if loop_write == 0 {
         return -1;
@@ -32,7 +33,7 @@ pub fn sys_sendto(sockfd: isize, buf: *const u8, len: usize , flags: isize , des
             return write_size;
         }
     }
-
+    
     println!(
         "sys_sendto(sockfd: {:#x?}, buf = ..., len:{}, flags={}, dest_addr={}, addrlen={} = 1 ---- fake",
         sockfd,
@@ -44,13 +45,13 @@ pub fn sys_sendto(sockfd: isize, buf: *const u8, len: usize , flags: isize , des
     write_size
 }
 
-pub fn sys_recvfrom(_sockfd: isize, buf: *const u8, len: usize , _flags: isize , _src_addr: usize, _addrlen: usize) -> isize{
+pub fn sys_recvfrom(_sockfd: isize, buf: *const u8, len: usize , _flags: isize , _src_addr: usize, _addrlen: usize) -> isize {
     let token = current_user_token();
     let userbuf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let mut buf_iter = userbuf.into_iter();
     let mut read_size = 0isize;
-
-    let mut ring_buffer = SOCKET_BUF.exclusive_access();
+    
+    let mut ring_buffer = SOCKET_BUF.lock();
     let loop_read = ring_buffer.available_read();
     if loop_read == 0 {
         return -1;

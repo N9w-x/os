@@ -1,8 +1,11 @@
 use alloc::sync::{Arc, Weak};
+
 use spin::Mutex;
-use crate::fs_fat::File;
+
 use crate::mm::UserBuffer;
 use crate::task::suspend_current_and_run_next;
+
+use super::File;
 
 pub struct Pipe {
     readable: bool,
@@ -11,7 +14,6 @@ pub struct Pipe {
 }
 
 impl Pipe {
-    //管道的读端口
     pub fn read_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>) -> Self {
         Self {
             readable: true,
@@ -19,8 +21,6 @@ impl Pipe {
             buffer,
         }
     }
-    
-    //写端口
     pub fn write_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>) -> Self {
         Self {
             readable: false,
@@ -30,17 +30,17 @@ impl Pipe {
     }
 }
 
-#[derive(Clone, PartialEq, Copy)]
+const RING_BUFFER_SIZE: usize = 32;
+
+#[derive(Copy, Clone, PartialEq)]
 enum RingBufferStatus {
     Full,
     Empty,
     Normal,
 }
 
-const RING_BUFFER_SIZE: usize = 32;
-
 pub struct PipeRingBuffer {
-    array: [u8; RING_BUFFER_SIZE],
+    arr: [u8; RING_BUFFER_SIZE],
     head: usize,
     tail: usize,
     status: RingBufferStatus,
@@ -50,47 +50,42 @@ pub struct PipeRingBuffer {
 impl PipeRingBuffer {
     pub fn new() -> Self {
         Self {
-            array: [0; RING_BUFFER_SIZE],
+            arr: [0; RING_BUFFER_SIZE],
             head: 0,
             tail: 0,
             status: RingBufferStatus::Empty,
             write_end: None,
         }
     }
-    
     pub fn set_write_end(&mut self, write_end: &Arc<Pipe>) {
-        self.write_end = Some(Arc::downgrade(write_end))
+        self.write_end = Some(Arc::downgrade(write_end));
     }
-    
     pub fn write_byte(&mut self, byte: u8) {
         self.status = RingBufferStatus::Normal;
-        self.array[self.tail] = byte;
+        self.arr[self.tail] = byte;
         self.tail = (self.tail + 1) % RING_BUFFER_SIZE;
-        if self.head == self.tail {
-            self.status = RingBufferStatus::Full
+        if self.tail == self.head {
+            self.status = RingBufferStatus::Full;
         }
     }
-    
     pub fn read_byte(&mut self) -> u8 {
         self.status = RingBufferStatus::Normal;
-        let byte = self.array[self.head];
+        let c = self.arr[self.head];
         self.head = (self.head + 1) % RING_BUFFER_SIZE;
         if self.head == self.tail {
-            self.status = RingBufferStatus::Empty
+            self.status = RingBufferStatus::Empty;
         }
-        byte
+        c
     }
-    
     pub fn available_read(&self) -> usize {
         if self.status == RingBufferStatus::Empty {
             0
         } else if self.tail > self.head {
             self.tail - self.head
         } else {
-            RING_BUFFER_SIZE + self.tail - self.head
+            self.tail + RING_BUFFER_SIZE - self.head
         }
     }
-    
     pub fn available_write(&self) -> usize {
         if self.status == RingBufferStatus::Full {
             0
@@ -98,7 +93,6 @@ impl PipeRingBuffer {
             RING_BUFFER_SIZE - self.available_read()
         }
     }
-    
     pub fn all_write_ends_closed(&self) -> bool {
         self.write_end.as_ref().unwrap().upgrade().is_none()
     }
@@ -108,64 +102,56 @@ impl File for Pipe {
     fn readable(&self) -> bool {
         self.readable
     }
-    
     fn writable(&self) -> bool {
         self.writable
     }
-    
     fn read(&self, buf: UserBuffer) -> usize {
-        assert!(self.readable);
+        assert!(self.readable());
         let mut buf_iter = buf.into_iter();
-        let mut total_read_size = 0;
+        let mut read_size = 0usize;
         loop {
-            let mut ring_buf = self.buffer.lock();
-            //读取次数
-            let read_turns = ring_buf.available_read();
-            
-            //当缓冲区读不出数据时让出cpu
-            if read_turns == 0 {
-                if ring_buf.all_write_ends_closed() {
-                    return total_read_size;
+            let mut ring_buffer = self.buffer.lock();
+            let loop_read = ring_buffer.available_read();
+            if loop_read == 0 {
+                if ring_buffer.all_write_ends_closed() {
+                    return read_size;
                 }
-                drop(ring_buf);
+                drop(ring_buffer);
                 suspend_current_and_run_next();
                 continue;
             }
-            
-            for _ in 0..read_turns {
+            // read at most loop_read bytes
+            for _ in 0..loop_read {
                 if let Some(byte_ref) = buf_iter.next() {
                     unsafe {
-                        *byte_ref = ring_buf.read_byte();
+                        *byte_ref = ring_buffer.read_byte();
                     }
-                    total_read_size += 1;
+                    read_size += 1;
                 } else {
-                    return total_read_size;
+                    return read_size;
                 }
             }
         }
     }
-    
     fn write(&self, buf: UserBuffer) -> usize {
         assert!(self.writable());
         let mut buf_iter = buf.into_iter();
-        let mut total_write_size = 0;
-        
+        let mut write_size = 0usize;
         loop {
-            let mut ring_buf = self.buffer.lock();
-            
-            let write_turns = ring_buf.available_write();
-            if write_turns == 0 {
-                drop(ring_buf);
+            let mut ring_buffer = self.buffer.lock();
+            let loop_write = ring_buffer.available_write();
+            if loop_write == 0 {
+                drop(ring_buffer);
                 suspend_current_and_run_next();
                 continue;
             }
-            
-            for _ in 0..write_turns {
+            // write at most loop_write bytes
+            for _ in 0..loop_write {
                 if let Some(byte_ref) = buf_iter.next() {
-                    ring_buf.write_byte(unsafe { *byte_ref });
-                    total_write_size += 1;
+                    ring_buffer.write_byte(unsafe { *byte_ref });
+                    write_size += 1;
                 } else {
-                    return total_write_size;
+                    return write_size;
                 }
             }
         }

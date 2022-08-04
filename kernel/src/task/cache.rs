@@ -1,10 +1,9 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-
 use fat32::BLOCK_SZ;
 use lazy_static::lazy_static;
 
-use crate::fs_fat::{FileType, open_file, OpenFlags, OSInode};
+use crate::fs::{FileType, open_file, OpenFlags, OSInode};
 use crate::UPIntrFreeCell;
 
 lazy_static! {

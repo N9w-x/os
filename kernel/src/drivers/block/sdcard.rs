@@ -2,9 +2,9 @@
 #![allow(non_camel_case_types)]
 #![allow(unused)]
 
-use super::BlockDevice;
-use crate::sync::UPIntrFreeCell;
+use alloc::sync::Arc;
 use core::convert::TryInto;
+
 use k210_hal::prelude::*;
 use k210_pac::{Peripherals, SPI0};
 use k210_soc::{
@@ -13,10 +13,13 @@ use k210_soc::{
     gpio,
     gpiohs,
     sleep::usleep,
-    spi::{aitm, frame_format, tmod, work_mode, SPIExt, SPIImpl, SPI},
+    spi::{aitm, frame_format, SPI, SPIExt, SPIImpl, tmod, work_mode},
     sysctl,
 };
 use lazy_static::*;
+use spin::Mutex;
+
+use super::BlockDevice;
 
 pub struct SDCard<SPI> {
     spi: SPI,
@@ -175,24 +178,24 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
              */
         }
     }
-
+    
     fn CS_HIGH(&self) {
         gpiohs::set_pin(self.cs_gpionum, true);
     }
-
+    
     fn CS_LOW(&self) {
         gpiohs::set_pin(self.cs_gpionum, false);
     }
-
+    
     fn HIGH_SPEED_ENABLE(&self) {
         self.spi.set_clk_rate(10000000);
     }
-
+    
     fn lowlevel_init(&self) {
         gpiohs::set_direction(self.cs_gpionum, gpio::direction::OUTPUT);
         self.spi.set_clk_rate(200000);
     }
-
+    
     fn write_data(&self, data: &[u8]) {
         self.spi.configure(
             work_mode::MODE0,
@@ -207,7 +210,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         );
         self.spi.send_data(self.spi_cs, data);
     }
-
+    
     /*
     fn write_data_dma(&self, data: &[u32]) {
         self.spi.configure(
@@ -225,7 +228,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             .send_data_dma(self.dmac, self.channel, self.spi_cs, data);
     }
      */
-
+    
     fn read_data(&self, data: &mut [u8]) {
         self.spi.configure(
             work_mode::MODE0,
@@ -240,7 +243,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         );
         self.spi.recv_data(self.spi_cs, data);
     }
-
+    
     /*
     fn read_data_dma(&self, data: &mut [u32]) {
         self.spi.configure(
@@ -258,7 +261,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             .recv_data_dma(self.dmac, self.channel, self.spi_cs, data);
     }
      */
-
+    
     /*
      * Send 5 bytes command to the SD card.
      * @param  cmd: The user expected command to send to SD card.
@@ -285,7 +288,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             crc,
         ]);
     }
-
+    
     /* Send end-command sequence to SD card */
     fn end_cmd(&self) {
         /* SD chip select high */
@@ -293,7 +296,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         /* Send the cmd byte */
         self.write_data(&[0xff]);
     }
-
+    
     /*
      * Returns the SD response.
      * @param  None
@@ -316,19 +319,19 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         /* After time out */
         0xFF
     }
-
+    
     /*
      * Get SD card data response.
      * @param  None
      * @retval The SD status: Read data response xxx0<status>1
-     *         - status 010: Data accepted
+     *         - status 010: Data accecpted
      *         - status 101: Data rejected due to a crc error
      *         - status 110: Data rejected due to a Write error.
      *         - status 111: Data rejected due to other error.
      */
     fn get_dataresponse(&self) -> u8 {
         let response = &mut [0u8];
-        /* Read response */
+        /* Read resonse */
         self.read_data(response);
         /* Mask unused bits */
         response[0] &= 0x1F;
@@ -343,7 +346,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         /* Return response */
         0
     }
-
+    
     /*
      * Read the CSD card register
      *         Reading the contents of the CSD register in SPI mode is a simple
@@ -423,10 +426,10 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             /* Byte 15 */
             CSD_CRC: (csd_tab[15] & 0xFE) >> 1,
             Reserved4: 1,
-            /* Return the response */
+            /* Return the reponse */
         })
     }
-
+    
     /*
      * Read the CID card register.
      *         Reading the contents of the CID register in SPI mode is a simple
@@ -480,7 +483,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             Reserved2: 1,
         })
     }
-
+    
     /*
      * Returns information about specific card.
      * @param  cardinfo: pointer to a SD_CardInfo structure that contains all SD
@@ -498,10 +501,10 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         };
         info.CardBlockSize = 1 << u64::from(info.SD_csd.RdBlockLen);
         info.CardCapacity = (u64::from(info.SD_csd.DeviceSize) + 1) * 1024 * info.CardBlockSize;
-
+    
         Ok(info)
     }
-
+    
     /*
      * Initializes the SD/SD communication in SPI mode.
      * @param  None
@@ -514,14 +517,14 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         self.CS_HIGH();
         /* NOTE: this reset doesn't always seem to work if the SD access was broken off in the
          * middle of an operation: CMDFailed(CMD0, 127). */
-
+    
         /* Send dummy byte 0xFF, 10 times with CS high */
         /* Rise CS and MOSI for 80 clocks cycles */
         /* Send dummy byte 0xFF */
         self.write_data(&[0xff; 10]);
         /*------------Put SD in SPI mode--------------*/
         /* SD initialized and set to SPI mode properly */
-
+    
         /* Send software reset */
         self.send_cmd(CMD::CMD0, 0, 0x95);
         let result = self.get_response();
@@ -529,7 +532,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         if result != 0x01 {
             return Err(InitError::CMDFailed(CMD::CMD0, result));
         }
-
+    
         /* Check voltage range */
         self.send_cmd(CMD::CMD8, 0x01AA, 0x87);
         /* 0x01 or 0x05 */
@@ -584,7 +587,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
         self.get_cardinfo()
             .map_err(|_| InitError::CannotGetCardInfo)
     }
-
+    
     /*
      * Reads a block of data from the SD.
      * @param  data_buf: slice that receives the data read from the SD.
@@ -642,7 +645,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
             Ok(())
         }
     }
-
+    
     /*
      * Writes a block to the SD
      * @param  data_buf: slice containing the data to be written to the SD.
@@ -702,7 +705,7 @@ impl</*'a,*/ X: SPI> SDCard</*'a,*/ X> {
 /** GPIOHS GPIO number to use for controlling the SD card CS pin */
 const SD_CS_GPIONUM: u8 = 7;
 /** CS value passed to SPI controller, this is a dummy value as SPI0_CS3 is not mapping to anything
- * in the FPIOA */
+* in the FPIOA */
 const SD_CS: u32 = 3;
 
 /** Connect pins to internal functions */
@@ -715,8 +718,8 @@ fn io_init() {
 }
 
 lazy_static! {
-    static ref PERIPHERALS: UPIntrFreeCell<Peripherals> =
-        unsafe { UPIntrFreeCell::new(Peripherals::take().unwrap()) };
+    static ref PERIPHERALS: Arc<Mutex<Peripherals>> =
+        unsafe { Arc::new(Mutex::new(Peripherals::take().unwrap())) };
 }
 
 fn init_sdcard() -> SDCard<SPIImpl<SPI0>> {
@@ -729,39 +732,34 @@ fn init_sdcard() -> SDCard<SPIImpl<SPI0>> {
     let clocks = k210_hal::clock::Clocks::new();
     peripherals.UARTHS.configure(115_200.bps(), &clocks);
     io_init();
-
+    
     let spi = peripherals.SPI0.constrain();
     let sd = SDCard::new(spi, SD_CS, SD_CS_GPIONUM);
     let info = sd.init().unwrap();
     let num_sectors = info.CardCapacity / 512;
     assert!(num_sectors > 0);
-
+    
     println!("init sdcard!");
     sd
 }
 
-pub struct SDCardWrapper(UPIntrFreeCell<SDCard<SPIImpl<SPI0>>>);
+pub struct SDCardWrapper(Arc<Mutex<SDCard<SPIImpl<SPI0>>>>);
 
 impl SDCardWrapper {
     pub fn new() -> Self {
-        unsafe { Self(UPIntrFreeCell::new(init_sdcard())) }
+        unsafe { Self(Arc::new(Mutex::new(init_sdcard()))) }
     }
 }
 
 impl BlockDevice for SDCardWrapper {
     fn read_block(&self, block_id: usize, buf: &mut [u8]) {
-        self.0
-            .exclusive_access()
-            .read_sector(buf, block_id as u32)
-            .unwrap();
+        self.0.lock().read_sector(buf, block_id as u32).unwrap();
     }
     fn write_block(&self, block_id: usize, buf: &[u8]) {
-        self.0
-            .exclusive_access()
-            .write_sector(buf, block_id as u32)
-            .unwrap();
+        self.0.lock().write_sector(buf, block_id as u32).unwrap();
     }
+    
     fn handle_irq(&self) {
-        unimplemented!();
+        //todo!()
     }
 }

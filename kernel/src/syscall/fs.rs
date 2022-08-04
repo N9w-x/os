@@ -9,9 +9,9 @@ use fat32::DIRENT_SZ;
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 
 use crate::console::INFO;
-use crate::fs_fat::{
-    AT_FD_CWD, ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat,
-    make_pipe, open_file, OpenFlags, OSInode, VFSFlag, WorkPath,
+use crate::fs::{
+    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
+    open_file, OpenFlags, OSInode, VFSFlag, WorkPath,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
@@ -20,6 +20,8 @@ use crate::task::{current_process, current_task, current_user_token, TimeSpec, U
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
 use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE};
+
+const AT_FD_CWD: isize = -100;
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
@@ -152,7 +154,7 @@ pub fn sys_get_cwd(buf: *mut u8, len: usize) -> isize {
     let token = current_user_token();
     //进程控制块
     let pcb = current_process();
-
+    
     let mut userbuf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let inner = pcb.inner_exclusive_access();
     let ret = userbuf.write(inner.work_path.to_string().as_bytes());
@@ -168,7 +170,7 @@ pub fn sys_chdir(path: *const u8) -> isize {
     let pcb = current_process();
     let mut inner = pcb.inner_exclusive_access();
     let path = translated_str(token, path);
-
+    
     //获取当前线程的work path
     let mut current_path = inner.work_path.to_string();
     drop(inner);
@@ -186,7 +188,7 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let path = translated_str(token, path);
-
+    
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::CREATE, FileType::Dir)
     } else if dir_fd == AT_FD_CWD {
@@ -198,7 +200,7 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-
+        
         if let Some(FileDescriptor::Regular(os_inode)) = inner.fd_table[fd_usize].clone() {
             if !os_inode.is_dir() {
                 return -1;
@@ -235,7 +237,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let dirent_size = core::mem::size_of::<Dirent>();
     let mut total_read = 0;
-
+    
     //我为什么会喜欢这种写法(
     let dir_inode = if fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
@@ -256,7 +258,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             _ => return -1,
         }
     };
-
+    
     let read_times = len / DIRENT_SZ;
     let mut dirent = Dirent::default();
     for _ in 0..read_times {
@@ -265,7 +267,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             total_read += dirent_size;
         }
     }
-
+    
     if total_read == dir_inode.get_size() {
         0
     } else {
@@ -303,7 +305,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     } else {
         let fd_usize = fd as usize;
         let inner = pcb.inner_exclusive_access();
-
+    
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
@@ -312,7 +314,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
             _ => return -1,
         }
     };
-
+    
     os_inode.get_fstat(&mut kstat);
     user_buf.write(kstat.as_bytes());
     0
@@ -322,7 +324,7 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
     let pcb = current_process();
-
+    
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDWR, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -331,11 +333,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     } else {
         let fd_usize = fd as usize;
         let mut inner = pcb.inner_exclusive_access();
-
+        
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-
+        
         match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
             _ => return -1,
@@ -360,7 +362,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         buf,
         core::mem::size_of::<Kstat>(),
     ));
-
+    
     // TODO 增加/dev/null文件
     if path == "/dev/null" {
         let mut kstat = Kstat {
@@ -370,7 +372,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         user_buf.write(kstat.as_bytes());
         return 0;
     }
-
+    
     return match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDONLY, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -382,7 +384,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-
+        
         return match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => {
                 let mut kstat = Kstat::default();
@@ -391,7 +393,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
                 0
             }
             _ => -1,
-        }
+        };
     } {
         Some(os_inode) => {
             let mut kstat = Kstat::default();
@@ -439,11 +441,11 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
 pub fn sys_ioctl(fd: usize, cmd: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
-
+    
     if fd as usize >= inner.fd_table.len() {
         return -1;
     }
-
+    
     if let Some(descriptor) = &inner.fd_table[fd] {
         let file = descriptor.clone();
         drop(inner);
@@ -458,11 +460,11 @@ pub fn sys_writev(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let inner = pcb.inner_exclusive_access();
-
+    
     if fd >= inner.fd_table.len() {
         return -EPERM;
     }
-
+    
     let fd_table = inner.fd_table.clone();
     drop(inner);
     let mut write_size = 0;
@@ -503,7 +505,7 @@ pub fn sys_readv(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
             return -EPERM;
         }
         for i in 0..iov_cnt {
-            let iovec = translated_ref(token, (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec,);
+            let iovec = translated_ref(token, (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec);
             let buf = translated_byte_buffer(token, iovec.base, iovec.len);
             ret += f.read(UserBuffer::new(buf)) as isize;
         }
@@ -528,7 +530,7 @@ pub fn sys_utimensat(
     };
     let p = process.inner_exclusive_access().work_path.to_string();
     let mut base_path = p.as_str();
-
+    
     if path.starts_with("/") {
         base_path = "/";
     } else if dirfd != AT_FD_CWD {
@@ -667,17 +669,28 @@ pub fn sys_statfs(_path: *const u8, buf: *const u8) -> isize {
 
 #[repr(C)]
 pub struct Statfs {
-    f_type: i64,        // Type of filesystem
-    f_bsize: i64,       // Optimal transfer block size
-    f_blocks: i64,      // Total data blocks in filesystem
-    f_bfree: i64,       // Free blocks in filesystem
-    f_bavail: i64,      // Free blocks available to unprivileged user
-    f_files: i64,       // Total inodes in filesystem
-    f_ffree: i64,       // Free inodes in filesystem
-    f_fsid: i64,        // Filesystem ID
-    f_name_len: i64,    // Maximum length of filenames
-    f_frsize: i64,      // Fragment size
-    f_flags: i64,       // Mount flags of filesystem
+    f_type: i64,
+    // Type of filesystem
+    f_bsize: i64,
+    // Optimal transfer block size
+    f_blocks: i64,
+    // Total data blocks in filesystem
+    f_bfree: i64,
+    // Free blocks in filesystem
+    f_bavail: i64,
+    // Free blocks available to unprivileged user
+    f_files: i64,
+    // Total inodes in filesystem
+    f_ffree: i64,
+    // Free inodes in filesystem
+    f_fsid: i64,
+    // Filesystem ID
+    f_name_len: i64,
+    // Maximum length of filenames
+    f_frsize: i64,
+    // Fragment size
+    f_flags: i64,
+    // Mount flags of filesystem
     f_spare: [i64; 4],  // Padding bytes
 }
 
@@ -698,7 +711,7 @@ impl Statfs {
             f_spare: [0; 4],
         }
     }
-
+    
     pub fn as_bytes(&self) -> &[u8] {
         let size = core::mem::size_of::<Self>();
         unsafe { core::slice::from_raw_parts(self as *const _ as usize as *mut u8, size) }

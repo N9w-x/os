@@ -75,9 +75,9 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
-
+    
             enable_supervisor_interrupt();
-
+    
             // get system call return value
             let result = syscall(
                 cx.x[17],
@@ -145,7 +145,7 @@ pub fn trap_handler() -> ! {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
-            ITIMER_MANAGER.exclusive_access().check_itimer(); // 检查定时器
+            ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
             suspend_current_and_run_next();
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
@@ -159,15 +159,15 @@ pub fn trap_handler() -> ! {
             );
         }
     }
-
+    
     handle_signals();
-
+    
     // check signals
     if let Some((errno, msg)) = check_signals_of_current() {
         println!("[kernel] {}", msg);
         exit_current_and_run_next(errno);
     }
-
+    
     trap_return();
 }
 
@@ -206,8 +206,8 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
-            ITIMER_MANAGER.exclusive_access().check_itimer(); // 检查定时器
-                                                              // do not schedule now
+            ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
+            // do not schedule now
         }
         _ => {
             panic!(

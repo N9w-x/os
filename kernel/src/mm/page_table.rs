@@ -72,7 +72,7 @@ impl PageTable {
             frames: vec![frame],
         }
     }
-
+    
     /// Temporarily used to get arguments from user space.
     pub fn from_token(satp: usize) -> Self {
         Self {
@@ -171,7 +171,7 @@ impl PageTable {
     //         if !pte.is_valid() {
     //             return false;
     //         }
-    //         pte.bits = pte.ppn().0 << 10 
+    //         pte.bits = pte.ppn().0 << 10
     //             | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
     //             true
     //     } else {
@@ -246,7 +246,7 @@ impl UserBuffer {
     pub fn new(buffers: Vec<&'static mut [u8]>) -> Self {
         Self { buffers }
     }
-
+    
     //len返回user buffer总长度
     pub fn len(&self) -> usize {
         let mut total: usize = 0;
@@ -255,13 +255,13 @@ impl UserBuffer {
         }
         total
     }
-
+    
     pub fn clear(&mut self) {
         for buffer in self.buffers.iter_mut() {
             buffer.iter_mut().map(|byte| *byte = 0);
         }
     }
-
+    
     //从第一个buf开始写入,返回写入长度 返回0 表示写入失败
     pub fn write(&mut self, buf: &[u8]) -> usize {
         assert!(self.buffers.len() >= 1);
@@ -270,7 +270,7 @@ impl UserBuffer {
         for buffer in self.buffers.iter_mut() {
             //当前写入的终点
             let write_end = len.min(write_len + buffer.len());
-
+    
             //取部分保证两个slice等长
             let copied_part = &buf[write_len..write_end];
             let copy_part = &mut buffer[..(write_end - write_len)];

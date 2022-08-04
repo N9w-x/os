@@ -1,22 +1,26 @@
-use super::id::TaskUserRes;
-use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext, Signum, SignalStruct};
-use crate::trap::TrapContext;
-use crate::{mm::PhysPageNum, sync::{UPIntrFreeCell, UPIntrRefMut}};
 use alloc::sync::{Arc, Weak};
+
+use spin::Mutex;
+
+use crate::mm::PhysPageNum;
+use crate::trap::TrapContext;
+
+use super::{KernelStack, kstack_alloc, ProcessControlBlock, Signum, TaskContext};
+use super::id::TaskUserRes;
 
 pub struct TaskControlBlock {
     // immutable
     pub process: Weak<ProcessControlBlock>,
     pub kstack: KernelStack,
     // mutable
-    pub inner: UPIntrFreeCell<TaskControlBlockInner>,
+    pub inner: Mutex<TaskControlBlockInner>,
 }
 
 impl TaskControlBlock {
-    pub fn inner_exclusive_access(&self) -> UPIntrRefMut<'_, TaskControlBlockInner> {
-        self.inner.exclusive_access()
+    pub fn inner_exclusive_access(&self) -> spin::MutexGuard<'_, TaskControlBlockInner> {
+        self.inner.lock()
     }
-
+    
     pub fn get_user_token(&self) -> usize {
         let process = self.process.upgrade().unwrap();
         let inner = process.inner_exclusive_access();
@@ -52,12 +56,12 @@ impl TaskControlBlockInner {
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
         self.trap_cx_ppn.get_mut()
     }
-
+    
     #[allow(unused)]
     fn get_status(&self) -> TaskStatus {
         self.task_status
     }
-
+    
     pub fn gettid(&self) -> usize {
         self.res.as_ref().unwrap().tid
     }
@@ -77,7 +81,7 @@ impl TaskControlBlock {
             process: Arc::downgrade(&process),
             kstack,
             inner: unsafe {
-                UPIntrFreeCell::new(TaskControlBlockInner {
+                Mutex::new(TaskControlBlockInner {
                     res: Some(res),
                     trap_cx_ppn,
                     task_cx: TaskContext::goto_trap_return(kstack_top),
@@ -94,7 +98,7 @@ impl TaskControlBlock {
             },
         }
     }
-
+    
     pub fn gettid(&self) -> usize {
         self
             .inner_exclusive_access()
@@ -103,7 +107,7 @@ impl TaskControlBlock {
             .unwrap()
             .tid
     }
-
+    
     pub fn get_task_id(&self) -> usize {
         self
             .inner_exclusive_access()

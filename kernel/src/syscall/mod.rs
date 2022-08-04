@@ -211,7 +211,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_STATFS => sys_statfs(args[0] as _, args[1] as _),
         SYSCALL_IOCTL => 0,
         SYSCALL_PREAD64 => sys_pread64(args[0], args[1] as *mut u8, args[2], args[3]),
-        SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
+        //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 => panic!("shut down"),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {

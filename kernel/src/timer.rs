@@ -4,10 +4,10 @@ use core::cmp::Ordering;
 
 use lazy_static::*;
 use riscv::register::time;
+use spin::Mutex;
 
 use crate::config::CLOCK_FREQ;
 use crate::sbi::set_timer;
-use crate::sync::UPIntrFreeCell;
 use crate::task::{add_task, TaskControlBlock};
 
 pub const TICKS_PER_SEC: usize = 100;
@@ -45,7 +45,9 @@ impl PartialEq for TimerCondVar {
         self.expire_ms == other.expire_ms
     }
 }
+
 impl Eq for TimerCondVar {}
+
 impl PartialOrd for TimerCondVar {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let a = -(self.expire_ms as isize);
@@ -61,18 +63,18 @@ impl Ord for TimerCondVar {
 }
 
 lazy_static! {
-    static ref TIMERS: UPIntrFreeCell<BinaryHeap<TimerCondVar>> =
-        unsafe { UPIntrFreeCell::new(BinaryHeap::<TimerCondVar>::new()) };
+    static ref TIMERS: Mutex<BinaryHeap<TimerCondVar>> =
+         Mutex::new(BinaryHeap::<TimerCondVar>::new()) ;
 }
 
 pub fn add_timer(expire_ms: usize, task: Arc<TaskControlBlock>) {
-    let mut timers = TIMERS.exclusive_access();
+    let mut timers = TIMERS.lock();
     timers.push(TimerCondVar { expire_ms, task });
 }
 
 pub fn check_timer() {
     let current_ms = get_time_ms();
-    let mut timers = TIMERS.exclusive_access();
+    let mut timers = TIMERS.lock();
     while let Some(timer) = timers.peek() {
         if timer.expire_ms <= current_ms {
             add_task(Arc::clone(&timer.task));

@@ -15,10 +15,8 @@ use lazy_static::*;
 use riscv::register::mstatus::set_fs;
 use riscv::register::sstatus::{FS, Sstatus};
 
-use sync::UPIntrFreeCell;
-
 use crate::sbi::send_ipi;
-use crate::task::{ENTRY_STATIC_DATA, get_hart_id, save_hart_id, TEST_SH_DATA};
+use crate::task::{get_hart_id, save_hart_id};
 
 #[cfg(feature = "board_k210")]
 #[path = "boards/k210.rs"]
@@ -31,7 +29,7 @@ mod board;
 mod console;
 mod config;
 mod drivers;
-mod fs_fat;
+mod fs;
 mod lang_items;
 mod mm;
 mod sbi;
@@ -56,8 +54,7 @@ fn clear_bss() {
 }
 
 lazy_static! {
-    pub static ref DEV_NON_BLOCKING_ACCESS: UPIntrFreeCell<bool> =
-        unsafe { UPIntrFreeCell::new(false) };
+    pub static ref DEV_NON_BLOCKING_ACCESS: spin::Mutex<bool> = unsafe { spin::Mutex::new(false) };
 }
 
 extern "C" fn wait_core(hart_id: usize) {
@@ -78,19 +75,16 @@ pub fn rust_main() -> ! {
         };
         clear_bss();
         mm::init();
-        {
-            let data_lock = ENTRY_STATIC_DATA.exclusive_access();
-            data_lock.as_slice();
-        }
         trap::init();
         println!("trap init success");
         trap::enable_timer_interrupt();
         timer::set_next_trigger();
+        println!("0");
         board::device_init();
-        fs_fat::list_apps();
-        fs_fat::init_rootfs();
+        fs::list_apps();
+        fs::init_rootfs();
         task::add_initproc();
-        *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
+        *DEV_NON_BLOCKING_ACCESS.lock() = true;
         println!("start run tasks");
         task::run_tasks();
         panic!("Unreachable in rust_main!");

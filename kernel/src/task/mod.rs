@@ -3,12 +3,14 @@ use alloc::vec::Vec;
 
 use lazy_static::*;
 
-pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
+//pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 pub use context::TaskContext;
-pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
+pub use futex::*;
+pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
 pub use info::CloneFlag;
-pub use timer::{TimeVal, TimeSpec, ITimerVal, ITIMER_MANAGER, UTIME_NOW, UTIME_OMIT};
-pub use manager::{add_task, fetch_task, pid2process, remove_from_pid2process, tid2task, remove_from_tid2task};
+pub use manager::{
+    add_task, fetch_task, pid2process, remove_from_pid2process, remove_from_tid2task, tid2task,
+};
 use process::ProcessControlBlock;
 pub use processor::{
     current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
@@ -16,15 +18,15 @@ pub use processor::{
 };
 pub use signal::*;
 use switch::__switch;
-pub use task::{TaskControlBlock, TaskStatus, ClearChildTid};
+pub use task::{ClearChildTid, TaskControlBlock, TaskStatus};
+pub use timer::{ITIMER_MANAGER, ITimerVal, TimeSpec, TimeVal, UTIME_NOW, UTIME_OMIT};
 
 use crate::config::PAGE_SIZE;
-use crate::fs_fat::{File, FileType, open_file, OpenFlags, OSInode};
-use crate::mm::{add_free, UserBuffer, translated_refmut};
-use crate::sync::futex_wake;
+use crate::fs::{File, FileType, open_file, OpenFlags, OSInode};
+use crate::mm::{add_free, translated_refmut, UserBuffer};
 
-mod cache;
 mod context;
+mod futex;
 mod id;
 mod info;
 mod manager;
@@ -39,7 +41,7 @@ mod timer;
 pub fn suspend_current_and_run_next() {
     // There must be an application running.
     let task = take_current_task().unwrap();
-
+    
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
@@ -47,7 +49,7 @@ pub fn suspend_current_and_run_next() {
     task_inner.task_status = TaskStatus::Ready;
     drop(task_inner);
     // ---- release current TCB
-
+    
     // push back to ready queue.
     add_task(task);
     // jump to scheduling cycle
@@ -64,7 +66,7 @@ pub fn block_current_task() -> *mut TaskContext {
 
 pub fn block_current_and_run_next() {
     let task = current_task().unwrap();
-    let mut inner  = task.inner_exclusive_access();
+    let mut inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut inner.task_cx as *mut TaskContext;
     inner.task_status = TaskStatus::Blocking;
     drop(inner);
@@ -87,14 +89,13 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     let mut task_inner = task.inner_exclusive_access();
     let process = task.process.upgrade().unwrap();
     let id = task_inner.res.as_ref().unwrap().id;
-
+    
     if let Some(clear_child_tid) = &task_inner.clear_child_tid {
         *translated_refmut(token, clear_child_tid.addr as *mut u32) = 0;
         futex_wake(clear_child_tid.addr, 1);
     }
     remove_from_tid2task(tid);
     
-
     // record exit code
     task_inner.exit_code = Some(exit_code);
     task_inner.res = None;
@@ -111,7 +112,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         process_inner.is_zombie = true;
         // record exit code of main process
         process_inner.exit_code = exit_code;
-
+    
         {
             // move all child processes under init process
             let mut initproc_inner = INITPROC.inner_exclusive_access();
@@ -120,7 +121,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
                 initproc_inner.children.push(child.clone());
             }
         }
-
+    
         // deallocate user res (including tid/trap_cx/ustack) of all threads
         // it has to be done before we dealloc the whole memory_set
         // otherwise they will be deallocated twice
@@ -129,7 +130,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
             let mut task_inner = task.inner_exclusive_access();
             task_inner.res = None;
         }
-
+    
         process_inner.children.clear();
         // deallocate other data in user space i.e. program code/data section
         process_inner.memory_set.recycle_data_pages();
@@ -137,9 +138,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
         process_inner.fd_table.clear();
     }
     // 定时器停止计时
-    ITIMER_MANAGER
-        .exclusive_access()
-        .remove_itimer(process.getpid());
+    ITIMER_MANAGER.lock().remove_itimer(process.getpid());
     drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
@@ -169,10 +168,10 @@ pub fn add_initproc_into_fs() {
     let mut num_app_ptr = _num_app as usize as *mut usize;
     // let start = _app_names as usize as *const u8;
     let mut app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
-
+    
     open_file("/", "mnt", OpenFlags::CREATE, FileType::Dir);
     open_file("/", "tmp", OpenFlags::CREATE, FileType::Dir);
-
+    
     // find if there already exits
     // println!("Find if there already exits ");
     //if let Some(inode) = open_file("/", "initproc", OpenFlags::RDONLY, FileType::Normal) {
@@ -186,9 +185,9 @@ pub fn add_initproc_into_fs() {
     //    //return;
     //    inode.delete();
     //}
-
+    
     // println!("Write apps(initproc & user_shell) to disk from mem ");
-
+    
     //Write apps(initproc & user_shell) to disk from mem
     match open_file("/", "initproc", OpenFlags::CREATE, FileType::Regular) {
         None => panic!("initproc create fail!"),
@@ -206,7 +205,7 @@ pub fn add_initproc_into_fs() {
             // println!("Init_proc OK");
         }
     }
-
+    
     match open_file("/", "user_shell", OpenFlags::CREATE, FileType::Regular) {
         None => panic!("user_shell create fail!"),
         Some(inode) => {
@@ -225,7 +224,7 @@ pub fn add_initproc_into_fs() {
         }
     }
     // println!("Write apps(initproc & user_shell) to disk from mem");
-
+    
     // release
     let mut start_ppn = app_start[0] / PAGE_SIZE + 1;
     println!(

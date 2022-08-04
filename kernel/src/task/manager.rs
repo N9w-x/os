@@ -1,8 +1,10 @@
-use super::{ProcessControlBlock, TaskControlBlock, task};
-use crate::sync::UPIntrFreeCell;
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::sync::Arc;
+
 use lazy_static::*;
+use spin::Mutex;
+
+use super::{ProcessControlBlock, task, TaskControlBlock};
 
 pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
@@ -24,49 +26,49 @@ impl TaskManager {
 }
 
 lazy_static! {
-    pub static ref TASK_MANAGER: UPIntrFreeCell<TaskManager> =
-        unsafe { UPIntrFreeCell::new(TaskManager::new()) };
-    pub static ref PID2PCB: UPIntrFreeCell<BTreeMap<usize, Arc<ProcessControlBlock>>> =
-        unsafe { UPIntrFreeCell::new(BTreeMap::new()) };
-    pub static ref TID2TCB: UPIntrFreeCell<BTreeMap<usize, Arc<TaskControlBlock>>> = 
-        unsafe { UPIntrFreeCell::new(BTreeMap::new()) };
+    pub static ref TASK_MANAGER: Mutex<TaskManager> =
+        unsafe { Mutex::new(TaskManager::new()) };
+    pub static ref PID2PCB: Mutex<BTreeMap<usize, Arc<ProcessControlBlock>>> =
+        unsafe { Mutex::new(BTreeMap::new()) };
+    pub static ref TID2TCB: Mutex<BTreeMap<usize, Arc<TaskControlBlock>>> =
+        unsafe { Mutex::new(BTreeMap::new()) };
 }
 
 pub fn add_task(task: Arc<TaskControlBlock>) {
-    TASK_MANAGER.exclusive_access().add(task);
+    TASK_MANAGER.lock().add(task);
 }
 
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
-    TASK_MANAGER.exclusive_access().fetch()
+    TASK_MANAGER.lock().fetch()
 }
 
 pub fn pid2process(pid: usize) -> Option<Arc<ProcessControlBlock>> {
-    let map = PID2PCB.exclusive_access();
+    let map = PID2PCB.lock();
     map.get(&pid).map(Arc::clone)
 }
 
 pub fn insert_into_pid2process(pid: usize, process: Arc<ProcessControlBlock>) {
-    PID2PCB.exclusive_access().insert(pid, process);
+    PID2PCB.lock().insert(pid, process);
 }
 
 pub fn remove_from_pid2process(pid: usize) {
-    let mut map = PID2PCB.exclusive_access();
+    let mut map = PID2PCB.lock();
     if map.remove(&pid).is_none() {
         panic!("cannot find pid {} in pid2process!", pid);
     }
 }
 
 pub fn tid2task(tid: usize) -> Option<Arc<TaskControlBlock>> {
-    let map = TID2TCB.exclusive_access();
+    let map = TID2TCB.lock();
     map.get(&tid).map(Arc::clone)
 }
 
 pub fn insert_into_tid2task(tid: usize, task: Arc<TaskControlBlock>) {
-    TID2TCB.exclusive_access().insert(tid, task);
+    TID2TCB.lock().insert(tid, task);
 }
 
 pub fn remove_from_tid2task(tid: usize) {
-    let mut map = TID2TCB.exclusive_access();
+    let mut map = TID2TCB.lock();
     if map.remove(&tid).is_none() {
         panic!("cannot find tid {} in tid2process!", tid);
     }

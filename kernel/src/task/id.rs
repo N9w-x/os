@@ -4,10 +4,10 @@ use alloc::{
 };
 
 use lazy_static::*;
+use spin::Mutex;
 
 use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
 use crate::mm::{KERNEL_SPACE, MapPermission, PhysPageNum, VirtAddr};
-use crate::sync::UPIntrFreeCell;
 
 use super::ProcessControlBlock;
 
@@ -43,29 +43,30 @@ impl RecycleAllocator {
 }
 
 lazy_static! {
-    static ref PID_ALLOCATOR: UPIntrFreeCell<RecycleAllocator> =
-        unsafe { UPIntrFreeCell::new(RecycleAllocator::new()) };
-    static ref TID_ALLOCATOR: UPIntrFreeCell<RecycleAllocator> = 
-        unsafe { UPIntrFreeCell::new(RecycleAllocator::new()) };
-    static ref KSTACK_ALLOCATOR: UPIntrFreeCell<RecycleAllocator> =
-        unsafe { UPIntrFreeCell::new(RecycleAllocator::new()) };
+    static ref PID_ALLOCATOR: Mutex<RecycleAllocator> =
+         Mutex::new(RecycleAllocator::new()) ;
+    static ref TID_ALLOCATOR: Mutex<RecycleAllocator> =
+         Mutex::new(RecycleAllocator::new()) ;
+    static ref KSTACK_ALLOCATOR: Mutex<RecycleAllocator> =
+         Mutex::new(RecycleAllocator::new()) ;
 }
 
 pub struct PidHandle(pub usize);
 
 pub fn pid_alloc() -> PidHandle {
-    PidHandle(PID_ALLOCATOR.exclusive_access().alloc())
+    PidHandle(PID_ALLOCATOR.lock().alloc())
 }
 
 impl Drop for PidHandle {
     fn drop(&mut self) {
-        PID_ALLOCATOR.exclusive_access().dealloc(self.0);
+        PID_ALLOCATOR.lock().dealloc(self.0);
     }
 }
+
 pub struct TidHandle(pub usize);
 
 pub fn tid_alloc() -> usize {
-    TID_ALLOCATOR.exclusive_access().alloc()
+    TID_ALLOCATOR.lock().alloc()
 }
 
 /// Return (bottom, top) of a kernel stack in kernel space.
@@ -78,9 +79,9 @@ pub fn kernel_stack_position(kstack_id: usize) -> (usize, usize) {
 pub struct KernelStack(pub usize);
 
 pub fn kstack_alloc() -> KernelStack {
-    let kstack_id = KSTACK_ALLOCATOR.exclusive_access().alloc();
+    let kstack_id = KSTACK_ALLOCATOR.lock().alloc();
     let (kstack_bottom, kstack_top) = kernel_stack_position(kstack_id);
-    KERNEL_SPACE.exclusive_access().insert_framed_area(
+    KERNEL_SPACE.lock().insert_framed_area(
         kstack_bottom.into(),
         kstack_top.into(),
         MapPermission::R | MapPermission::W,
@@ -93,7 +94,7 @@ impl Drop for KernelStack {
         let (kernel_stack_bottom, _) = kernel_stack_position(self.0);
         let kernel_stack_bottom_va: VirtAddr = kernel_stack_bottom.into();
         KERNEL_SPACE
-            .exclusive_access()
+            .lock()
             .remove_area_with_start_vpn(kernel_stack_bottom_va.into());
     }
 }
@@ -101,8 +102,8 @@ impl Drop for KernelStack {
 impl KernelStack {
     #[allow(unused)]
     pub fn push_on_top<T>(&self, value: T) -> *mut T
-    where
-        T: Sized,
+        where
+            T: Sized,
     {
         let kernel_stack_top = self.get_top();
         let ptr_mut = (kernel_stack_top - core::mem::size_of::<T>()) as *mut T;
@@ -118,8 +119,10 @@ impl KernelStack {
 }
 
 pub struct TaskUserRes {
-    pub tid: usize,     // 线程标识符
-    pub id: usize,      // 进程内线程编号：0, 1, 2...
+    pub tid: usize,
+    // 线程标识符
+    pub id: usize,
+    // 进程内线程编号：0, 1, 2...
     pub ustack_base: usize,
     pub process: Weak<ProcessControlBlock>,
 }
@@ -151,7 +154,7 @@ impl TaskUserRes {
         }
         task_user_res
     }
-
+    
     pub fn alloc_user_res(&self) {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
@@ -172,7 +175,7 @@ impl TaskUserRes {
             MapPermission::R | MapPermission::W,
         );
     }
-
+    
     fn dealloc_user_res(&self) {
         // dealloc tid
         let process = self.process.upgrade().unwrap();
@@ -188,7 +191,7 @@ impl TaskUserRes {
             .memory_set
             .remove_area_with_start_vpn(trap_cx_bottom_va.into());
     }
-
+    
     #[allow(unused)]
     pub fn alloc_id(&mut self) {
         self.id = self
@@ -198,17 +201,17 @@ impl TaskUserRes {
             .inner_exclusive_access()
             .alloc_id();
     }
-
+    
     pub fn dealloc_id(&self) {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
         process_inner.dealloc_id(self.id);
     }
-
+    
     pub fn trap_cx_user_va(&self) -> usize {
         trap_cx_bottom_from_id(self.id)
     }
-
+    
     pub fn trap_cx_ppn(&self) -> PhysPageNum {
         let process = self.process.upgrade().unwrap();
         let process_inner = process.inner_exclusive_access();
@@ -219,7 +222,7 @@ impl TaskUserRes {
             .unwrap()
             .ppn()
     }
-
+    
     pub fn ustack_base(&self) -> usize {
         self.ustack_base
     }

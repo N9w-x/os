@@ -2,7 +2,6 @@ use alloc::sync::Arc;
 
 use lazy_static::*;
 
-use crate::sync::UPIntrFreeCell;
 use crate::trap::TrapContext;
 
 use super::{fetch_task, TaskStatus};
@@ -33,20 +32,21 @@ impl Processor {
 }
 
 lazy_static! {
-    pub static ref PROCESSOR: UPIntrFreeCell<Processor> =
-        unsafe { UPIntrFreeCell::new(Processor::new()) };
+    pub static ref PROCESSOR: spin::Mutex<Processor> =
+        unsafe { spin::Mutex::new(Processor::new()) };
 }
 
 pub fn run_tasks() {
     loop {
-        let mut processor = PROCESSOR.exclusive_access();
+        let mut processor = PROCESSOR.lock();
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
-            let next_task_cx_ptr = task.inner.exclusive_session(|task_inner| {
-                task_inner.task_status = TaskStatus::Running;
-                &task_inner.task_cx as *const TaskContext
-            });
+            let next_task_cx_ptr = {
+                let mut inner = task.inner.lock();
+                inner.task_status = TaskStatus::Running;
+                &inner.task_cx as *const TaskContext
+            };
             processor.current = Some(task);
             // release processor manually
             drop(processor);
@@ -60,11 +60,11 @@ pub fn run_tasks() {
 }
 
 pub fn take_current_task() -> Option<Arc<TaskControlBlock>> {
-    PROCESSOR.exclusive_access().take_current()
+    PROCESSOR.lock().take_current()
 }
 
 pub fn current_task() -> Option<Arc<TaskControlBlock>> {
-    PROCESSOR.exclusive_access().current()
+    PROCESSOR.lock().current()
 }
 
 pub fn current_process() -> Arc<ProcessControlBlock> {
@@ -98,7 +98,7 @@ pub fn current_kstack_top() -> usize {
 }
 
 pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
-    let idle_task_cx_ptr = PROCESSOR.exclusive_access().get_idle_task_cx_ptr();
+    let idle_task_cx_ptr = PROCESSOR.lock().get_idle_task_cx_ptr();
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }

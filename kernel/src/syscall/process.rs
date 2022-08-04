@@ -4,10 +4,10 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
 
-use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
+//use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 use crate::config::{CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE};
 use crate::console::{ERROR, INFO, WARNING};
-use crate::fs_fat::{File, FileDescriptor, FileType, open_file, OpenFlags};
+use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::{
     align_up, PTEFlags, translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer, VirtAddr, VirtPageNum,
 };
@@ -51,7 +51,7 @@ pub fn sys_get_times(tms: *mut u64) -> isize {
     *translated_refmut(token, unsafe { tms.add(1) }) = usec;
     *translated_refmut(token, unsafe { tms.add(2) }) = usec;
     *translated_refmut(token, unsafe { tms.add(3) }) = usec;
-
+    
     usec as isize
 }
 
@@ -108,7 +108,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         if flags.contains(CloneFlag::CLONE_SETTLS) {
             child_trap_cx.x[4] = tls;
         }
-
+    
         if stack_ptr != 0 {
             child_trap_cx.x[2] = stack_ptr;
         }
@@ -121,7 +121,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         let child_task = child_process_inner.tasks[0].as_ref().unwrap();
         let mut child_task_inner = child_task.inner_exclusive_access();
         let child_pid = child_process.getpid();
-
+    
         // if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         //     return -1;
         // }
@@ -137,7 +137,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
             *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_pid as u32;
         }
-
+    
         //更改用户栈
         let child_trap_cx = child_task_inner.get_trap_cx();
         if stack_ptr != 0 {
@@ -175,18 +175,18 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     
     let process = current_process();
     match path.as_str() {
-        "runtest.exe" => {
-            let data_lock = TEST_SH_DATA.exclusive_access();
-            let data = data_lock.as_slice();
-            process.exec(data, args_vec);
-            0
-        }
-        "entry-static.exe" => {
-            let data_lock = ENTRY_STATIC_DATA.exclusive_access();
-            let data = data_lock.as_slice();
-            process.exec(data, args_vec);
-            0
-        }
+        //"runtest.exe" => {
+        //    let data_lock = TEST_SH_DATA.exclusive_access();
+        //    let data = data_lock.as_slice();
+        //    process.exec(data, args_vec);
+        //    0
+        //}
+        //"entry-static.exe" => {
+        //    let data_lock = ENTRY_STATIC_DATA.exclusive_access();
+        //    let data = data_lock.as_slice();
+        //    process.exec(data, args_vec);
+        //    0
+        //}
         _ => {
             if let Some(app_inode) = open_file(
                 &work_path,
@@ -196,7 +196,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             ) {
                 let all_data = app_inode.read_all();
                 process.exec(&all_data, args_vec);
-    
+            
                 // return argc because cx.x[10] will be covered with it later
                 0
             } else {
@@ -216,7 +216,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
             let process = current_process();
             let mut inner = process.inner_exclusive_access();
             let token = inner.get_user_token();
-
+    
             if !inner
                 .children
                 .iter()
@@ -225,7 +225,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                 found = false;
                 // ---- release current PCB
             }
-
+    
             if found {
                 let pair = inner.children.iter().enumerate().find(|(_, p)| {
                     // println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
@@ -235,13 +235,13 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                     drop(inner);
                     flag
                 });
-
+        
                 if let Some((idx, _)) = pair {
                     let child = inner.children.remove(idx);
                     assert_eq!(Arc::strong_count(&child), 1);
                     let found_pid = child.getpid();
                     let exit_code = child.inner_exclusive_access().exit_code;
-    
+            
                     if exit_code_ptr as usize != 0 {
                         *translated_refmut(token, exit_code_ptr) = (exit_code & 0xff) << 8;
                     }
@@ -335,7 +335,7 @@ pub fn sys_brk(addr: usize) -> isize {
         let mut old_end = inner.heap_end.0;
         let align_end = align_up(addr);
         inner.heap_end = align_end.into();
-
+    
         // remove lazy
         loop {
             if old_end >= align_end {
@@ -428,7 +428,7 @@ pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
     let token = current_user_token();
     let task = current_task().unwrap();
     let task_inner = task.inner_exclusive_access();
-
+    
     let ctid = if let Some(p) = &task_inner.clear_child_tid {
         p.ctid
     } else {
@@ -446,16 +446,16 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     } else {
         return -1;
     };
-
+    
     let act = act as *mut SigAction;
     let oldact = oldact as *mut SigAction;
-
+    
     let token = current_user_token();
     let task = current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-
+    
     // 将原来的sigaction保存到oldact地址中
     if let Some(old_sigaction) = process_inner.signal_actions.actions[signum] {
         if oldact as usize != 0 {
@@ -465,7 +465,7 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     } else if oldact as usize != 0 {
         *translated_refmut(token, oldact) = SigAction::default();
     }
-
+    
     // 保存新的sigaction
     if act as usize != 0 {
         let sigaction = *translated_ref(token, act);
@@ -473,7 +473,7 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
         // println!("[sigaction] tid: {} sigaction: {:#X}, signum: {}", task.gettid(), sigaction.sa_handler, signum);
         process_inner.signal_actions.actions[signum] = Some(sigaction);
     }
-
+    
     0
 }
 
@@ -482,11 +482,11 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
     let mut mask = inner.signal_masks.bits();
-
+    
     if old_set as usize != 0 {
         *translated_refmut(token, old_set) = mask;
     }
-
+    
     if set as usize != 0 {
         let new_set = *translated_ref(token, set);
         match how {
@@ -507,18 +507,18 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
     if set as usize == 0 {
         return -1;
     }
-
+    
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let token = inner.get_user_token();
-
+    
     if timeout as usize == 0 {
         return -1;
     }
     let timeout = translated_refmut(token, timeout as *mut TimeSpec).to_nsec();
-
+    
     let info = (info as usize != 0).then_some(translated_refmut(token, info as *mut SigInfo));
-
+    
     let start = get_time_ns();
     while *translated_refmut(token, set) == 0 {
         let now = get_time_ns();
@@ -526,9 +526,9 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
             return -1;
         }
     }
-
+    
     let set = Signum::from_bits(*translated_refmut(token, set) as u64).unwrap();
-
+    
     for serial in 1..MAX_SIG {
         if set.contains(Signum::from_serial(serial).unwrap()) {
             if let Some(info) = info {
@@ -539,7 +539,7 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
             return serial as isize;
         }
     }
-
+    
     -1
 }
 
@@ -548,10 +548,10 @@ pub fn sys_sigreturn() -> isize {
     let task = current_task().unwrap();
     let tid = task.gettid();
     let mut task_inner = task.inner_exclusive_access();
-
+    
     // 取消当前正在响应的信号
     task_inner.signal_handling = 0;
-
+    
     // 将备份的trap上下文恢复
     let trap_cx = task_inner.get_trap_cx();
     let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
@@ -560,7 +560,7 @@ pub fn sys_sigreturn() -> isize {
     trap_cx.sepc = mc_pc;
     
     // println!("[sigreturn] tid: {}, new_pc: {:#X}", tid, trap_cx.sepc);
-
+    
     0
 }
 
@@ -613,7 +613,7 @@ pub fn sys_setitimer(which: isize, new_value: *mut usize, old_value: usize) -> i
         current_process().inner_exclusive_access().itimer = new_itimer;
         // 插入到itimer向量中，开始计时
         ITIMER_MANAGER
-            .exclusive_access()
+            .lock()
             .insert_itimer(new_itimer, current_process().getpid());
         0
     } else {

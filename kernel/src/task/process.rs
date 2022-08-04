@@ -1,31 +1,34 @@
-use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, MEMORY_MAP_BASE, MAP_FIXED, PAGE_SIZE, FD_MAX};
-use crate::console::INFO;
-use crate::fs_fat::{AT_FD_CWD, File, FileDescriptor, FileType, open_file, OpenFlags, OSInode, Stdin, Stdout, WorkPath};
-use crate::mm::{
-    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, translated_ref,
-    translated_refmut, VirtAddr, VirtPageNum, translated_byte_buffer, UserBuffer, VPNRange,
+use spin::Mutex;
+
+use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, FD_MAX, MAP_FIXED, MEMORY_MAP_BASE, PAGE_SIZE};
+use crate::fs::{
+    File, FileDescriptor, FileType, open_file, OpenFlags, OSInode, Stdin, Stdout, WorkPath,
 };
-use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
+use crate::mm::{
+    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet,
+    translated_byte_buffer, translated_ref, translated_refmut, UserBuffer, VirtAddr, VirtPageNum, VPNRange,
+};
 use crate::task::SignalStruct;
 use crate::trap::{trap_handler, TrapContext};
 
-use super::{add_task, ITimerVal, Signum, current_user_token};
+use super::{add_task, current_user_token, ITimerVal, Signum};
 use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::{insert_into_pid2process, insert_into_tid2task};
 use super::TaskControlBlock;
 
+const AT_FD_CWD: isize = -100;
+
 pub struct ProcessControlBlock {
     // immutable
     pub pid: PidHandle,
     // mutable
-    inner: UPIntrFreeCell<ProcessControlBlockInner>,
+    inner: Mutex<ProcessControlBlockInner>,
 }
 
 pub struct PCBAttribute {
@@ -45,9 +48,6 @@ pub struct ProcessControlBlockInner {
     pub signal_actions: SignalStruct,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
-    pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
-    pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
-    pub condvar_list: Vec<Option<Arc<Condvar>>>,
     //工作目录
     pub work_path: WorkPath,
     //tid attribute
@@ -66,7 +66,7 @@ impl ProcessControlBlockInner {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-
+    
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -75,7 +75,7 @@ impl ProcessControlBlockInner {
             self.fd_table.len() - 1
         }
     }
-
+    
     // alloc a specific new_fd
     pub fn alloc_specific_fd(&mut self, new_fd: usize) -> usize {
         for _ in self.fd_table.len()..=new_fd {
@@ -83,19 +83,19 @@ impl ProcessControlBlockInner {
         }
         new_fd
     }
-
+    
     pub fn alloc_id(&mut self) -> usize {
         self.task_res_allocator.alloc()
     }
-
+    
     pub fn dealloc_id(&mut self, id: usize) {
         self.task_res_allocator.dealloc(id)
     }
-
+    
     pub fn thread_count(&self) -> usize {
         self.tasks.len()
     }
-
+    
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
@@ -106,8 +106,8 @@ impl ProcessControlBlock {
         self.inner.is_locked()
     }
     
-    pub fn inner_exclusive_access(&self) -> UPIntrRefMut<'_, ProcessControlBlockInner> {
-        self.inner.exclusive_access()
+    pub fn inner_exclusive_access(&self) -> spin::MutexGuard<'_, ProcessControlBlockInner> {
+        self.inner.lock()
     }
     
     //只有init proc调用,其他的线程从fork产生
@@ -119,7 +119,7 @@ impl ProcessControlBlock {
         let process = Arc::new(Self {
             pid: pid_handle,
             inner: unsafe {
-                UPIntrFreeCell::new(ProcessControlBlockInner {
+                Mutex::new(ProcessControlBlockInner {
                     is_zombie: false,
                     memory_set,
                     parent: None,
@@ -143,9 +143,6 @@ impl ProcessControlBlock {
                     // trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
-                    mutex_list: Vec::new(),
-                    semaphore_list: Vec::new(),
-                    condvar_list: Vec::new(),
                     work_path: WorkPath::new(),
                     // tid_attr: PCBAttribute {
                     //     set_child_tid: 0,
@@ -175,7 +172,7 @@ impl ProcessControlBlock {
         *trap_cx = TrapContext::app_init_context(
             entry_point,
             ustack_top,
-            KERNEL_SPACE.exclusive_access().token(),
+            KERNEL_SPACE.lock().token(),
             kstack_top,
             trap_handler as usize,
         );
@@ -188,7 +185,7 @@ impl ProcessControlBlock {
         add_task(task);
         process
     }
-
+    
     /// Only support processes with a single thread.
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
@@ -218,7 +215,7 @@ impl ProcessControlBlock {
             String::from("LD_LIBRARY_PATH=/"),
             String::from("PATH=/"),
         ];
-
+        
         // substitute memory_set
         let mut inner = self.inner_exclusive_access();
         inner.memory_set = memory_set;
@@ -237,9 +234,9 @@ impl ProcessControlBlock {
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         // push arguments on user stack
-
+        
         let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
-
+        
         //stack top
         //argc
         //*argv[] with null as end
@@ -251,19 +248,19 @@ impl ProcessControlBlock {
         //argv[]
         //envp[]
         //stack bottom
-
+        
         let push_stack = |parms: Vec<String>, user_sp: &mut usize| {
             //record parm ptr
             let mut ptr_vec: Vec<usize> = (0..=parms.len()).collect();
-
+            
             //end with null
             ptr_vec[parms.len()] = 0;
-
+            
             for index in 0..parms.len() {
                 *user_sp -= parms[index].len() + 1;
                 ptr_vec[index] = *user_sp;
                 let mut p = *user_sp;
-
+                
                 //write chars to [user_sp,user_sp + len]
                 for c in parms[index].as_bytes() {
                     *translated_refmut(new_token, p as *mut u8) = *c;
@@ -273,18 +270,18 @@ impl ProcessControlBlock {
             }
             ptr_vec
         };
-
+        
         //////////////////////// envp[] ////////////////////////////////
         let envp = push_stack(envs, &mut user_sp);
         // make sure aligned to 8b for k210
         user_sp -= user_sp % core::mem::size_of::<usize>();
-
+        
         ///////////////////// argv[] /////////////////////////////////
         let argc = args.len();
         let argv = push_stack(args, &mut user_sp);
         // make the user_sp aligned to 8B for k210 platform
         user_sp -= user_sp % core::mem::size_of::<usize>();
-
+        
         ///////////////////// platform ///////////////////////////////
         let platform = "RISC-V64";
         user_sp -= platform.len() + 1;
@@ -295,7 +292,7 @@ impl ProcessControlBlock {
             p += 1;
         }
         *translated_refmut(new_token, p as *mut u8) = 0;
-
+        
         ///////////////////// rand bytes ////////////////////////////
         user_sp -= 16;
         auxv.push(AuxHeader::new(AT_RANDOM, user_sp));
@@ -304,10 +301,10 @@ impl ProcessControlBlock {
             new_token,
             (user_sp + core::mem::size_of::<usize>()) as *mut usize,
         ) = 0x08090a0b0c0d0e0f;
-
+        
         ///////////////////// padding ////////////////////////////////
         user_sp -= user_sp % 16;
-
+        
         ///////////////////// auxv[] //////////////////////////////////
         auxv.push(AuxHeader::new(AT_EXECFN, argv[0]));
         auxv.push(AuxHeader::new(AT_NULL, 0));
@@ -322,7 +319,7 @@ impl ProcessControlBlock {
             ) = aux_header.value;
             addr += core::mem::size_of::<AuxHeader>();
         }
-
+        
         ///////////////////// *envp[] /////////////////////////////////
         user_sp -= envp.len() * core::mem::size_of::<usize>();
         let envp_base = user_sp;
@@ -331,7 +328,7 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = env_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-
+        
         ///////////////////// *argv[] ////////////////////////////////
         user_sp -= argv.len() * core::mem::size_of::<usize>();
         let argv_base = user_sp;
@@ -340,27 +337,27 @@ impl ProcessControlBlock {
             *translated_refmut(new_token, ustack_ptr as *mut usize) = argv_ptr;
             ustack_ptr += core::mem::size_of::<usize>();
         }
-
+        
         ///////////////////// argc ///////////////////////////////////
         user_sp -= core::mem::size_of::<usize>();
         *translated_refmut(new_token, user_sp as *mut usize) = argc;
-
+        
         // initialize trap_cx
         let mut trap_cx = TrapContext::app_init_context(
             entry_point,
             user_sp,
-            KERNEL_SPACE.exclusive_access().token(),
+            KERNEL_SPACE.lock().token(),
             task.kstack.get_top(),
             trap_handler as usize,
         );
-
+        
         trap_cx.x[10] = argc; //argc
         trap_cx.x[11] = argv_base; //argv
         trap_cx.x[12] = envp_base; //envp
         trap_cx.x[13] = aux_base; //auxv
         *task_inner.get_trap_cx() = trap_cx;
     }
-
+    
     /// Only support processes with a single thread.
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
         let mut parent = self.inner_exclusive_access();
@@ -384,7 +381,7 @@ impl ProcessControlBlock {
         let child = Arc::new(Self {
             pid,
             inner: unsafe {
-                UPIntrFreeCell::new(ProcessControlBlockInner {
+                Mutex::new(ProcessControlBlockInner {
                     is_zombie: false,
                     memory_set,
                     parent: Some(Arc::downgrade(self)),
@@ -401,9 +398,6 @@ impl ProcessControlBlock {
                     // trap_ctx_backup: None,
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
-                    mutex_list: Vec::new(),
-                    semaphore_list: Vec::new(),
-                    condvar_list: Vec::new(),
                     work_path: path,
                     // tid_attr: PCBAttribute {
                     //     set_child_tid: 0,
@@ -448,7 +442,7 @@ impl ProcessControlBlock {
         add_task(task);
         child
     }
-
+    
     pub fn clone_thread(
         self: &Arc<Self>,
         parent_task: Arc<TaskControlBlock>,
@@ -463,7 +457,7 @@ impl ProcessControlBlock {
                 .ustack_base(),
             true,
         ));
-
+        
         // attach task to child process
         let task_id = task.get_task_id();
         let tasks = &mut self.inner_exclusive_access().tasks;
@@ -477,18 +471,18 @@ impl ProcessControlBlock {
         let trap_cx = task_inner.get_trap_cx();
         *trap_cx = *parent_task.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = task.kstack.get_top();
-
+        
         drop(task_inner);
         insert_into_tid2task(task.gettid(), Arc::clone(&task));
         add_task(Arc::clone(&task));
-
+        
         task
     }
-
+    
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
-
+    
     pub fn mmap(
         &self,
         start: usize,
@@ -513,126 +507,148 @@ impl ProcessControlBlock {
             let mut old_perm = MapPermission::U;
             let mut old_start = VirtAddr::from(0).floor();
             let mut old_end = VirtAddr::from(0).floor();
-            let mut old_flags= 0usize;
-            let mut old_fd= 0usize;
+            let mut old_flags = 0usize;
+            let mut old_fd = 0usize;
             let mut old_offset = 0usize;
             loop {
                 let mut loop_flag = true;
                 // let mut index = 0;
                 // for (i,mmap_area) in inner.memory_set.mmap_areas.iter().enumerate(){
-                for mmap_area in self.inner_exclusive_access().memory_set.mmap_areas.iter(){
+                for mmap_area in self.inner_exclusive_access().memory_set.mmap_areas.iter() {
                     // 在此处提取old_area相关信息
-                    // 1                  1          
-                    // fix area        |----- - -    
-                    // old area           |----|     
-                    // 3                    3               
-                    // fix area          |-- - - -        
-                    // old area        |-----|  
-                    if (start_vpn < mmap_area.vpn_range.get_start() && end_vpn > mmap_area.vpn_range.get_start()) 
-                            ||(start_vpn >= mmap_area.vpn_range.get_start() && start_vpn < mmap_area.vpn_range.get_end()) {
+                    // 1                  1
+                    // fix area        |----- - -
+                    // old area           |----|
+                    // 3                    3
+                    // fix area          |-- - - -
+                    // old area        |-----|
+                    if (start_vpn < mmap_area.vpn_range.get_start()
+                        && end_vpn > mmap_area.vpn_range.get_start())
+                        || (start_vpn >= mmap_area.vpn_range.get_start()
+                        && start_vpn < mmap_area.vpn_range.get_end())
+                    {
                         old_perm = mmap_area.map_perm;
-                        old_start= mmap_area.vpn_range.get_start();
+                        old_start = mmap_area.vpn_range.get_start();
                         old_end = mmap_area.vpn_range.get_end();
-                        old_flags= mmap_area.flags;
+                        old_flags = mmap_area.flags;
                         old_offset = mmap_area.offset;
                         old_fd = mmap_area.fd;
                         loop_flag = false;
-                    }            
+                    }
                 }
                 if loop_flag {
                     break;
                 }
                 // println!("fixed handle real start ...");
-                self.inner_exclusive_access().memory_set.remove_mmap_area(old_start);
-                // fix area        |-----|   
-                // old area           |----| 
+                self.inner_exclusive_access()
+                    .memory_set
+                    .remove_mmap_area(old_start);
+                // fix area        |-----|
+                // old area           |----|
                 if start_vpn <= old_start && end_vpn > old_start && end_vpn < old_end {
                     // println!("fixed situation 1");
                     let u_old_start: usize = old_start.into();
                     // 向上取整页
-                    old_offset = old_offset + ( (len+start- u_old_start +PAGE_SIZE -1) / PAGE_SIZE )*PAGE_SIZE; 
+                    old_offset = old_offset
+                        + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
                     old_start = VirtAddr::from(start + len).ceil();
                     // println!("[part-1]fixed situation 1  start_vpn:{:#?}  end_vpn:{:#?}",old_start,old_end);
                     // println!("[part-2]fixed situation 1  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);
-                    self.inner_exclusive_access().memory_set.insert_mmap_area(MemoryMapArea::new(
-                        old_start.into(),
-                        old_end.into(),
-                        old_perm,
-                        old_flags,
-                        old_fd,
-                        old_offset,
-                    ));
-                    self.inner_exclusive_access().memory_set.alloc_mmap_area(old_start.into());
-                    self.map_file_for_mmap(VirtAddr::from(old_start).0);
-                } else 
-                // fix area        |----------|   
-                // old area           |----| 
-                // 刚好完全覆盖的情况也在此处
-                if start_vpn <= old_start && end_vpn >= old_end {
-                    // println!("fixed situation 2");
-                    // println!("[part-2]fixed situation 2  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);
-                    
-                } else
-                // fix area          |--|        
-                // old area        |-----|   
-                if start_vpn >= old_start && end_vpn <= old_end {
-                    // println!("fixed situation 3");
-                    if end_vpn != old_end{
-                        // 向上取整页
-                        let u_old_start: usize = old_start.into();
-                        let part3_offset = old_offset+( (len+start-u_old_start +PAGE_SIZE -1) / PAGE_SIZE )*PAGE_SIZE; 
-                        let part3_start = VirtAddr::from(start + len).ceil();
-                        let part3_end= old_end;
-                        let part3_perm = old_perm;
-                        let part3_flags= old_flags;
-                        let part3_fd= old_fd;
-                        // println!("[part-3]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",part3_start,part3_end);
-                        self.inner_exclusive_access().memory_set.insert_mmap_area(MemoryMapArea::new(
-                            part3_start.into(),
-                            part3_end.into(),
-                            part3_perm,
-                            part3_flags,
-                            part3_fd,
-                            part3_offset,
-                        ));
-                        self.inner_exclusive_access().memory_set.alloc_mmap_area(part3_start.into());
-                        self.map_file_for_mmap(VirtAddr::from(part3_start).0);
-                    } 
-                
-                    // println!("[part-2]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);      
-                    if start_vpn != old_start {
-                        // 原区域作为第一段
-                        old_end = VirtAddr::from(start+PAGE_SIZE-1).floor();
-                        // println!("[part-1]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",old_start,old_end);
-                        self.inner_exclusive_access().memory_set.insert_mmap_area(MemoryMapArea::new(
+                    self.inner_exclusive_access()
+                        .memory_set
+                        .insert_mmap_area(MemoryMapArea::new(
                             old_start.into(),
                             old_end.into(),
-                            old_perm ,
+                            old_perm,
                             old_flags,
                             old_fd,
                             old_offset,
                         ));
-                        self.inner_exclusive_access().memory_set.alloc_mmap_area(old_start.into());
-                        self.map_file_for_mmap(VirtAddr::from(old_start).0);
-                    }                    
+                    self.inner_exclusive_access()
+                        .memory_set
+                        .alloc_mmap_area(old_start.into());
+                    self.map_file_for_mmap(VirtAddr::from(old_start).0);
                 } else
-                // fix area          |-------|        
-                // old area        |-----|  
+                // fix area        |----------|
+                // old area           |----|
+                // 刚好完全覆盖的情况也在此处
+                if start_vpn <= old_start && end_vpn >= old_end {
+                    // println!("fixed situation 2");
+                    // println!("[part-2]fixed situation 2  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);
+                } else
+                // fix area          |--|
+                // old area        |-----|
+                if start_vpn >= old_start && end_vpn <= old_end {
+                    // println!("fixed situation 3");
+                    if end_vpn != old_end {
+                        // 向上取整页
+                        let u_old_start: usize = old_start.into();
+                        let part3_offset = old_offset
+                            + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
+                        let part3_start = VirtAddr::from(start + len).ceil();
+                        let part3_end = old_end;
+                        let part3_perm = old_perm;
+                        let part3_flags = old_flags;
+                        let part3_fd = old_fd;
+                        // println!("[part-3]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",part3_start,part3_end);
+                        self.inner_exclusive_access().memory_set.insert_mmap_area(
+                            MemoryMapArea::new(
+                                part3_start.into(),
+                                part3_end.into(),
+                                part3_perm,
+                                part3_flags,
+                                part3_fd,
+                                part3_offset,
+                            ),
+                        );
+                        self.inner_exclusive_access()
+                            .memory_set
+                            .alloc_mmap_area(part3_start.into());
+                        self.map_file_for_mmap(VirtAddr::from(part3_start).0);
+                    }
+            
+                    // println!("[part-2]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);
+                    if start_vpn != old_start {
+                        // 原区域作为第一段
+                        old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
+                        // println!("[part-1]fixed situation 3  start_vpn:{:#?}  end_vpn:{:#?}",old_start,old_end);
+                        self.inner_exclusive_access().memory_set.insert_mmap_area(
+                            MemoryMapArea::new(
+                                old_start.into(),
+                                old_end.into(),
+                                old_perm,
+                                old_flags,
+                                old_fd,
+                                old_offset,
+                            ),
+                        );
+                        self.inner_exclusive_access()
+                            .memory_set
+                            .alloc_mmap_area(old_start.into());
+                        self.map_file_for_mmap(VirtAddr::from(old_start).0);
+                    }
+                } else
+                // fix area          |-------|
+                // old area        |-----|
                 if start_vpn > old_start && end_vpn > old_end {
                     // println!("fixed situation 4");
                     // 原区域作为第一段
-                    old_end = VirtAddr::from(start+PAGE_SIZE-1).floor();
+                    old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
                     // println!("[part-1]fixed situation 4  start_vpn:{:#?}  end_vpn:{:#?}",old_start,old_end);
                     // println!("[part-2]fixed situation 4  start_vpn:{:#?}  end_vpn:{:#?}",start_vpn,end_vpn);
-                    self.inner_exclusive_access().memory_set.insert_mmap_area(MemoryMapArea::new(
-                        old_start.into(),
-                        old_end.into(),
-                        old_perm ,
-                        old_flags,
-                        old_fd,
-                        old_offset,
-                    ));
-                    self.inner_exclusive_access().memory_set.alloc_mmap_area(old_start.into());
+                    self.inner_exclusive_access()
+                        .memory_set
+                        .insert_mmap_area(MemoryMapArea::new(
+                            old_start.into(),
+                            old_end.into(),
+                            old_perm,
+                            old_flags,
+                            old_fd,
+                            old_offset,
+                        ));
+                    self.inner_exclusive_access()
+                        .memory_set
+                        .alloc_mmap_area(old_start.into());
                     self.map_file_for_mmap(VirtAddr::from(old_start).0);
                 }
             }
@@ -646,12 +662,14 @@ impl ProcessControlBlock {
         drop(inner);
         self.map_file_for_mmap(start);
     }
-
+    
     pub fn munmap(&self, start: usize, len: usize) -> bool {
         let start_vpn = VirtPageNum::from(VirtAddr::from(start));
-        self.inner_exclusive_access().memory_set.remove_mmap_area(start_vpn)
+        self.inner_exclusive_access()
+            .memory_set
+            .remove_mmap_area(start_vpn)
     }
-
+    
     /// 映射文件
     pub fn map_file_for_mmap(&self, addr: usize) {
         // TODO: start, end, offset, vpn
@@ -659,7 +677,7 @@ impl ProcessControlBlock {
         let token = inner.memory_set.token();
         let fd_table = inner.fd_table.clone();
         let vpn = VirtPageNum::from(VirtAddr::from(addr));
-
+        
         let mut flag = false;
         let mut vpn_range = VPNRange::new(0.into(), 0.into());
         let mut fd = 0;
@@ -673,7 +691,7 @@ impl ProcessControlBlock {
                 offset = area.fd;
             }
         }
-
+        
         drop(inner);
         if flag {
             for vpn in vpn_range.into_iter() {
@@ -683,12 +701,13 @@ impl ProcessControlBlock {
                             if inode.readable() {
                                 let mmap_base = VirtAddr::from(vpn).0;
                                 let page_offset = addr - mmap_base + offset;
-                                let buf = translated_byte_buffer(token, addr as *const u8, PAGE_SIZE);
+                                let buf =
+                                    translated_byte_buffer(token, addr as *const u8, PAGE_SIZE);
                                 inode.set_offset(page_offset);
                                 inode.read(UserBuffer::new(buf));
                             }
                         }
-                        FileDescriptor::Abstract(_) => {},
+                        FileDescriptor::Abstract(_) => {}
                     }
                 }
             }
@@ -696,31 +715,31 @@ impl ProcessControlBlock {
         return;
     }
 }
-
-impl UPIntrRefMut<'_, ProcessControlBlockInner> {
-    /// 打开dirfd文件夹下，路径为path的文件
-    pub fn open_file(self, dirfd: isize, path: String, flags: OpenFlags) -> Option<Arc<OSInode>>  {
-        if WorkPath::is_abs_path(&path) {
-            drop(self);
-            open_file("/", &path, flags, FileType::Regular)
-        } else if dirfd == AT_FD_CWD {
-            let work_path = self.work_path.to_string();
-            drop(self);
-            open_file(&work_path, &path, flags, FileType::Dir)
-        } else {
-            if dirfd as usize >= self.fd_table.len() {
-                return None;
-            }
-
-            if let Some(FileDescriptor::Regular(os_inode)) = self.fd_table[dirfd as usize].clone() {
-                if !os_inode.is_dir() {
-                    return None;
-                }
-                drop(self);
-                os_inode.create(&path, FileType::Regular)
-            } else {
-                None
-            }
-        }
-    }
-}
+//
+//impl UPIntrRefMut<'_, ProcessControlBlockInner> {
+//    /// 打开dirfd文件夹下，路径为path的文件
+//    pub fn open_file(self, dirfd: isize, path: String, flags: OpenFlags) -> Option<Arc<OSInode>> {
+//        if WorkPath::is_abs_path(&path) {
+//            drop(self);
+//            open_file("/", &path, flags, FileType::Regular)
+//        } else if dirfd == AT_FD_CWD {
+//            let work_path = self.work_path.to_string();
+//            drop(self);
+//            open_file(&work_path, &path, flags, FileType::Dir)
+//        } else {
+//            if dirfd as usize >= self.fd_table.len() {
+//                return None;
+//            }
+//
+//            if let Some(FileDescriptor::Regular(os_inode)) = self.fd_table[dirfd as usize].clone() {
+//                if !os_inode.is_dir() {
+//                    return None;
+//                }
+//                drop(self);
+//                os_inode.create(&path, FileType::Regular)
+//            } else {
+//                None
+//            }
+//        }
+//    }
+//}

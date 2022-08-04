@@ -1,6 +1,8 @@
-use super::PageTableEntry;
-use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
 use core::fmt::{self, Debug, Formatter};
+
+use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
+
+use super::PageTableEntry;
 
 const PA_WIDTH_SV39: usize = 56;
 const VA_WIDTH_SV39: usize = 39;
@@ -198,15 +200,16 @@ impl StepByOne for PhysPageNum {
 
 #[derive(Copy, Clone)]
 pub struct SimpleRange<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     l: T,
     r: T,
 }
+
 impl<T> SimpleRange<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     pub fn new(start: T, end: T) -> Self {
         assert!(start <= end, "start {:?} > end {:?}!", start, end);
@@ -222,9 +225,10 @@ where
         self.l <= t && t < self.r
     }
 }
+
 impl<T> IntoIterator for SimpleRange<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     type Item = T;
     type IntoIter = SimpleRangeIterator<T>;
@@ -232,24 +236,27 @@ where
         SimpleRangeIterator::new(self.l, self.r)
     }
 }
+
 pub struct SimpleRangeIterator<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     current: T,
     end: T,
 }
+
 impl<T> SimpleRangeIterator<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     pub fn new(l: T, r: T) -> Self {
         Self { current: l, end: r }
     }
 }
+
 impl<T> Iterator for SimpleRangeIterator<T>
-where
-    T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
+    where
+        T: StepByOne + Copy + PartialEq + PartialOrd + Debug,
 {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
