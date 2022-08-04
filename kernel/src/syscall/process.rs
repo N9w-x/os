@@ -100,15 +100,12 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
             *translated_refmut(token, ptid as *mut u32) = child_tid as u32;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) && ctid as usize != 0 {
-            child_task_inner.clear_child_tid = Some(ClearChildTid {
-                ctid: *translated_ref(token, ctid as *mut u32),
-                addr: ctid,
-            })
+            child_task_inner.clear_child_tid = ctid;
         }
         if flags.contains(CloneFlag::CLONE_SETTLS) {
             child_trap_cx.x[4] = tls;
         }
-    
+
         if stack_ptr != 0 {
             child_trap_cx.x[2] = stack_ptr;
         }
@@ -121,23 +118,23 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         let child_task = child_process_inner.tasks[0].as_ref().unwrap();
         let mut child_task_inner = child_task.inner_exclusive_access();
         let child_pid = child_process.getpid();
-    
+        let child_tid = child_task_inner.gettid();
+
         // if !flags.contains(CloneFlag::CLONE_SIGHLD) {
         //     return -1;
         // }
         if flags.contains(CloneFlag::CLONE_PARENT_SETTID) && ptid != 0 {
-            *translated_refmut(process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_pid as u32;
+            *translated_refmut(process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
+            *translated_refmut(child_process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) && ctid != 0 {
-            child_task_inner.clear_child_tid = Some(ClearChildTid {
-                ctid: *translated_ref(token, ctid as *mut u32),
-                addr: ctid as usize
-            });
+            child_task_inner.clear_child_tid = ctid;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
-            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_pid as u32;
+            child_task_inner.set_child_tid = ctid;
+            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_tid as u32;
         }
-    
+
         //更改用户栈
         let child_trap_cx = child_task_inner.get_trap_cx();
         if stack_ptr != 0 {
@@ -427,14 +424,8 @@ pub fn sys_get_euid() -> isize {
 pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
     let token = current_user_token();
     let task = current_task().unwrap();
-    let task_inner = task.inner_exclusive_access();
-    
-    let ctid = if let Some(p) = &task_inner.clear_child_tid {
-        p.ctid
-    } else {
-        0
-    };
-    *translated_refmut(token, tid_ptr as *mut u32) = ctid;
+    let mut task_inner = task.inner_exclusive_access();
+    task_inner.clear_child_tid = tid_ptr;
     task_inner.gettid() as isize
 }
 

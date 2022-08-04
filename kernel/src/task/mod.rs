@@ -90,9 +90,9 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     let process = task.process.upgrade().unwrap();
     let id = task_inner.res.as_ref().unwrap().id;
     
-    if let Some(clear_child_tid) = &task_inner.clear_child_tid {
-        *translated_refmut(token, clear_child_tid.addr as *mut u32) = 0;
-        futex_wake(clear_child_tid.addr, 1);
+    if task_inner.clear_child_tid != 0 {
+        *translated_refmut(token, task_inner.clear_child_tid as *mut u32) = 0;
+        futex_wake(task_inner.clear_child_tid, 1);
     }
     remove_from_tid2task(tid);
     

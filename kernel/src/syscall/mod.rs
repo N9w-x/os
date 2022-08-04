@@ -170,7 +170,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_TIMES => sys_get_times(args[0] as *mut u64),
         SYSCALL_UNAME => sys_uname(args[0] as *mut u8),
         SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
-        SYSCALL_MPROTECT => sys_mprotect(args[0], args[1], args[2]),
+        SYSCALL_MPROTECT => sys_mprotect(args[0], args[1], args[2] as isize),
         // SYSCALL_FUTEX => sys_futex(args[0], args[1], args[2], args[3], args[4], args[5]),
         SYSCALL_FUTEX => 0,
         SYSCALL_TKILL => sys_tkill(args[0], args[1]),
