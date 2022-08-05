@@ -37,6 +37,6 @@ pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
         ROOT_INODE.clone()
     } else {
         let path: Vec<&str> = curr_path.split("/").collect();
-        ROOT_INODE.find_vfile_bypath(path).unwrap()
+        ROOT_INODE.find_vfile_bypath(&path).unwrap()
     }
 }

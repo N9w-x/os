@@ -11,8 +11,6 @@ pub struct BlockCache {
     block_id: usize,
     block_device: Arc<dyn BlockDevice>,
     modified: bool,
-    #[allow(unused)]
-    time_stamp: usize,
 }
 
 impl BlockCache {
@@ -21,15 +19,11 @@ impl BlockCache {
         let mut cache = [0u8; BLOCK_SZ];
         //println!("cache new: blk_id = {}", block_id);
         block_device.read_block(block_id, &mut cache);
-        // TODO: 时间戳
-        //let mut time_stamp = time::read();
-        let time_stamp = 0;
         Self {
             cache,
             block_id,
             block_device,
             modified: false,
-            time_stamp,
         }
     }
 
@@ -111,30 +105,7 @@ impl BlockCacheManager {
         block_id: usize,
         //block_device: Arc<dyn BlockDevice>,
     ) -> Option<Arc<RwLock<BlockCache>>> {
-        if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
-            Some(Arc::clone(&pair.1))
-        } else {
-            None
-            // substitute
-            // if self.queue.len() == BLOCK_CACHE_SIZE {
-            //     // from front to tail
-            //     if let Some((idx, _)) = self.queue
-            //         .iter()
-            //         .enumerate()
-            //         .find(|(_, pair)| Arc::strong_count(&pair.1) == 1) {
-            //         self.queue.drain(idx..=idx);
-            //     } else {
-            //         panic!("Run out of BlockCache!");
-            //     }
-            // }
-            // // load block into mem and push back
-            // let block_cache = Arc::new(RwLock::new(
-            //     BlockCache::new(block_id, Arc::clone(&block_device))
-            // ));
-            // self.queue.push_back((block_id, Arc::clone(&block_cache)));
-            // //println!("blkcache: {:?}", block_cache.read().cache);
-            // Some(block_cache)
-        }
+        self.queue.iter().find(|pair| pair.0 == block_id).map(|pair| Arc::clone(&pair.1))
     }
 
     pub fn get_block_cache(
@@ -179,7 +150,7 @@ impl BlockCacheManager {
 
 lazy_static! {
     pub static ref DATA_BLOCK_CACHE_MANAGER: RwLock<BlockCacheManager> =
-        RwLock::new(BlockCacheManager::new(1034));
+        RwLock::new(BlockCacheManager::new(10));
 }
 
 lazy_static! {
@@ -187,7 +158,7 @@ lazy_static! {
         RwLock::new(BlockCacheManager::new(10));
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum CacheMode {
     READ,
     WRITE,
@@ -261,30 +232,3 @@ pub fn write_to_dev() {
     DATA_BLOCK_CACHE_MANAGER.write().drop_all();
 }
 
-/*
-pub fn get_dirent_block_cache(
-    block_id: usize,
-    block_device: Arc<dyn BlockDevice>
-) -> Arc<Mutex<BlockCache>> {
-    DATA_BLOCK_CACHE_MANAGER.lock().get_block_cache(block_id, block_device)
-}
-*/
-
-/*
-enum CacheType {
-    INFO,
-    FAT1,
-    FAT2,
-    DIRENT,
-    DATA,
-}
-
-fn type_to_range(type_: CacheType)->Range<usize>{
-    match type_ {
-        CacheType::INFO => {0..1}
-        CacheType::FAT1 => {1..3}
-        CacheType::FAT2 => {3..5}
-        CacheType::DIRENT => {5..8}
-        CacheType::DATA => {8..19}
-    }
-}*/

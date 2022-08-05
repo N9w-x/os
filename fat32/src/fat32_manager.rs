@@ -82,7 +82,7 @@ impl FAT32Manager {
                 let mut start_sec: u32 = 0;
                 for i in 0..4 {
                     let tmp = ssec_bytes[i] as u32;
-                    start_sec = start_sec + (tmp << (8 * i));
+                    start_sec += (tmp << (8 * i));
                     //println!("start sec = {}, buf = {}", start_sec , ssec_bytes[i])
                 }
                 start_sec

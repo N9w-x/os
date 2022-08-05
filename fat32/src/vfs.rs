@@ -300,7 +300,7 @@ impl VFile {
     /* 根据路径递归搜索文件 */
     pub fn find_vfile_bypath(&self, path: &Vec<&str>) -> Option<Arc<VFile>> {
         if path.is_empty() {
-            return None;
+            return Some(Arc::new(self.clone()));
         }
         let mut current_vfile = self.clone();
         for &path_part in path {

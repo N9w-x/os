@@ -12,6 +12,7 @@ use crate::drivers::BLOCK_DEVICE;
 use crate::fs::{File, get_current_inode};
 use crate::fs::fs_info::{Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, Kstat, VFSFlag};
 use crate::mm::UserBuffer;
+use crate::timer::get_time_us;
 
 pub struct OSInode {
     readable: bool,
@@ -39,14 +40,15 @@ impl OSInode {
             }),
         }
     }
-    
+
     pub fn read_all(&self) -> Vec<u8> {
+        let start = get_time_us();
         let mut inner = self.inner.lock();
         let mut buf = [0u8; BLOCK_SZ];
         //通过预分配内存空间减少拷贝次数
         let file_size = inner.inode.get_size();
         let mut vec = Vec::with_capacity(file_size as usize);
-        
+    
         loop {
             //分块读取文件内容
             let size = inner.inode.read_at(inner.offset, &mut buf);
@@ -56,10 +58,11 @@ impl OSInode {
             inner.offset += size;
             vec.extend_from_slice(&buf[..size]);
         }
-        
+        let end = get_time_us();
+        println!("load file {:#} us", end - start);
         vec
     }
-    
+
     pub fn read_all_with_out(&self) -> Vec<u8> {
         let mut inner = self.inner.lock();
         let mut buf = [0u8; BLOCK_SZ];
@@ -67,7 +70,7 @@ impl OSInode {
         let file_size = inner.inode.get_size();
         let mut vec = Vec::with_capacity(file_size as usize);
         let mut block_count = 0;
-        
+
         loop {
             //分块读取文件内容
             let size = inner.inode.read_at(inner.offset, &mut buf);
@@ -81,40 +84,40 @@ impl OSInode {
             inner.offset += size;
             vec.extend_from_slice(&buf[..size]);
         }
-        
+
         vec
     }
-    
+
     pub fn is_dir(&self) -> bool {
         let inner = self.inner.lock();
         inner.inode.is_dir()
     }
-    
+
     pub fn clear(&self) {
         let inner = self.inner.lock();
         inner.inode.clear()
     }
-    
+
     pub fn delete(&self) -> usize {
         self.inner.lock().inode.remove()
     }
-    
+
     pub fn get_size(&self) -> usize {
         self.inner.lock().inode.get_size() as usize
     }
-    
+
     pub fn get_name(&self) -> String {
         String::from(self.inner.lock().inode.get_name())
     }
-    
+
     pub fn get_inode_id(&self) -> u32 {
         self.inner.lock().inode.first_cluster()
     }
-    
+
     pub fn set_inode_id(&self, inode_id: u32) {
         self.inner.lock().inode.set_first_cluster(inode_id);
     }
-    
+
     pub fn set_offset(&self, offset: usize) {
         self.inner.lock().offset = offset;
     }
@@ -148,13 +151,13 @@ impl OSInode {
         }
         let mut path_split: Vec<&str> = path.split('/').collect();
         let (readable, writable) = (true, true);
-        if let Some(target_inode) = inode.find_vfile_bypath(path_split.clone()) {
+        if let Some(target_inode) = inode.find_vfile_bypath(&path_split) {
             target_inode.remove();
         }
         let filename = path_split.pop().unwrap();
         
         //创建失败的条件包括: 目录不存在,存在文件但不是目录
-        match inode.find_vfile_bypath(path_split) {
+        match inode.find_vfile_bypath(&path_split) {
             None => None,
             Some(vfile) => {
                 if !vfile.is_dir() {
@@ -173,7 +176,7 @@ impl OSInode {
         let inner = self.inner.lock();
         let path_split = path.split('/').collect();
         
-        inner.inode.find_vfile_bypath(path_split).map(|inode| {
+        inner.inode.find_vfile_bypath(&path_split).map(|inode| {
             let (readable, writable) = flags.read_write();
             Arc::new(OSInode::new(readable, writable, inode.clone()))
         })
@@ -305,7 +308,7 @@ impl File for OSInode {
 pub fn ch_dir(curr_path: &str, path: &str) -> isize {
     let curr_inode = get_current_inode(curr_path);
     let path_split: Vec<&str> = path.split("/").collect();
-    match curr_inode.find_vfile_bypath(path_split) {
+    match curr_inode.find_vfile_bypath(&path_split) {
         None => -1,
         Some(inode) => {
             let attribute = inode.get_attribute();
@@ -321,8 +324,7 @@ pub fn ch_dir(curr_path: &str, path: &str) -> isize {
 lazy_static! {
     pub static ref ROOT_INODE: Arc<VFile> = {
         let fat_manager = FAT32Manager::open(BLOCK_DEVICE.clone());
-        let reader = fat_manager.read();
-        Arc::new(reader.get_root_vfile(&fat_manager))
+        Arc::new(fat_manager.get_root_vfile(&fat_manager))
     };
 }
 
@@ -383,22 +385,22 @@ pub fn open_file(
 ) -> Option<Arc<OSInode>> {
     let cur_inode = get_current_inode(work_path);
     let (readable, writable) = flags.read_write();
-    let mut path_split: Vec<&str> = path.split('/').filter(|s| s.len() > 0).collect();
+    let mut path_split: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
         //如果文件存在删除对应文件
-        if let Some(inode) = cur_inode.find_vfile_bypath(path_split.clone()) {
+        if let Some(inode) = cur_inode.find_vfile_bypath(&path_split) {
             inode.remove();
         }
     
         let filename = path_split.pop().unwrap();
-        let dir = cur_inode.find_vfile_bypath(path_split).unwrap();
+        let dir = cur_inode.find_vfile_bypath(&path_split).unwrap();
         let attr = _type.into();
         //创建文件
         dir.create(filename, attr)
            .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
     } else {
-        cur_inode.find_vfile_bypath(path_split).map(|inode| {
+        cur_inode.find_vfile_bypath(&path_split).map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear()
             }
@@ -408,15 +410,69 @@ pub fn open_file(
 }
 
 pub fn init_rootfs() {
-    let _proc = open_file("/", "proc", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _mounts = open_file("/proc", "mounts", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _meminfo = open_file("/proc", "meminfo", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _var = open_file("/", "var", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _tmp = open_file("/", "tmp", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _dev = open_file("/", "dev", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let _null = open_file("/dev", "null", OpenFlags::CREATE | OpenFlags::DIRECTORY, FileType::Dir).unwrap();
-    let zero = open_file("/dev", "zero", OpenFlags::CREATE | OpenFlags::RDONLY, FileType::Regular).unwrap();
-    let _invalid = open_file("/dev/null", "invalid", OpenFlags::CREATE | OpenFlags::RDONLY, FileType::Regular).unwrap();
+    let _proc = open_file(
+        "/",
+        "proc",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _mounts = open_file(
+        "/proc",
+        "mounts",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _meminfo = open_file(
+        "/proc",
+        "meminfo",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _var = open_file(
+        "/",
+        "var",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _tmp = open_file(
+        "/",
+        "tmp",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _dev = open_file(
+        "/",
+        "dev",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let _null = open_file(
+        "/dev",
+        "null",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();
+    let zero = open_file(
+        "/dev",
+        "zero",
+        OpenFlags::CREATE | OpenFlags::RDONLY,
+        FileType::Regular,
+    )
+        .unwrap();
+    let _invalid = open_file(
+        "/dev/null",
+        "invalid",
+        OpenFlags::CREATE | OpenFlags::RDONLY,
+        FileType::Regular,
+    )
+        .unwrap();
     let mut buf = vec![0u8; 1];
     let zero_write = UserBuffer::new(vec![unsafe {
         core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
