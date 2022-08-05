@@ -502,13 +502,19 @@ impl MemorySet {
         &mut self,
         start_va: VirtAddr,
         end_va: VirtAddr,
-        map_perm: MapPermission,
         fd: usize,
         offset: usize,
         flags: usize,
         fd_table: &Vec<Option<FileDescriptor>>,
     ) {
-        let mut kmmap_area = MemoryMapArea::new(start_va, end_va, map_perm, fd, offset, flags);
+        let mut kmmap_area = MemoryMapArea::new(
+            start_va,
+            end_va,
+            MapPermission::W | MapPermission::R,
+            fd,
+            offset,
+            flags,
+        );
         kmmap_area.map(&mut self.page_table, fd_table);
         self.mmap_areas.push(kmmap_area);
     }
@@ -516,20 +522,6 @@ impl MemorySet {
     pub fn remove_kmmap_area(&mut self, start_vpn: VirtPageNum) -> bool {
         self.remove_mmap_area(start_vpn)
     }
-
-    // pub fn insert_mmap_area(
-    //     &mut self,
-    //     start_va: VirtAddr,
-    //     end_va: VirtAddr,
-    //     map_perm: MapPermission,
-    //     fd: usize,
-    //     offset: usize,
-    //     flags: usize,
-    // ) {
-    //     self.mmap_areas.push(MemoryMapArea::new(
-    //         start_va, end_va, map_perm, fd, offset, flags,
-    //     ));
-    // }
 
     pub fn remove_mmap_area(&mut self, start_vpn: VirtPageNum) -> bool {
         if let Some((idx, area)) = self

@@ -4,21 +4,24 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 
 //use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
-use crate::config::{CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE};
+use crate::config::{
+    CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE,
+};
 use crate::console::{ERROR, INFO, WARNING};
-use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
+use crate::fs::{open_file, File, FileDescriptor, FileType, OpenFlags};
 use crate::mm::{
-    align_up, PTEFlags, translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer, VirtAddr, VirtPageNum,
+    align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str, PTEFlags,
+    UserBuffer, VirtAddr, VirtPageNum,
 };
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, ClearChildTid, CloneFlag, current_process, current_task,
-    current_user_token, exit_current_and_run_next, ITIMER_MANAGER, ITimerVal, MAX_SIG, pid2process, SIG_BLOCK,
-    SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, tid2task, TimeSpec, UContext,
+    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
+    pid2process, suspend_current_and_run_next, tid2task, ClearChildTid, CloneFlag, ITimerVal,
+    SigAction, SigInfo, Signum, TimeSpec, UContext, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK,
+    SIG_SETMASK, SIG_UNBLOCK,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use alloc::slice;
-
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -89,13 +92,13 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     let process = current_process();
     let task = current_task().unwrap();
     let flags = unsafe { CloneFlag::from_bits_unchecked(flags) };
-    
+
     if flags.contains(CloneFlag::CLONE_THREAD) {
         let child_task = process.clone_thread(task);
         let child_tid = child_task.gettid();
         let mut child_task_inner = child_task.inner_exclusive_access();
         let child_trap_cx = child_task_inner.get_trap_cx();
-        
+
         if flags.contains(CloneFlag::CLONE_PARENT_SETTID) && ptid as usize != 0 {
             *translated_refmut(token, ptid as *mut u32) = child_tid as u32;
         }
@@ -124,15 +127,22 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
         //     return -1;
         // }
         if flags.contains(CloneFlag::CLONE_PARENT_SETTID) && ptid != 0 {
-            *translated_refmut(process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
-            *translated_refmut(child_process.inner_exclusive_access().get_user_token(), ptid as *mut u32) = child_tid as u32;
+            *translated_refmut(
+                process.inner_exclusive_access().get_user_token(),
+                ptid as *mut u32,
+            ) = child_tid as u32;
+            *translated_refmut(
+                child_process.inner_exclusive_access().get_user_token(),
+                ptid as *mut u32,
+            ) = child_tid as u32;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_CLEARTID) && ctid != 0 {
             child_task_inner.clear_child_tid = ctid;
         }
         if flags.contains(CloneFlag::CLONE_CHILD_SETTID) {
             child_task_inner.set_child_tid = ctid;
-            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) = child_tid as u32;
+            *translated_refmut(child_process_inner.get_user_token(), ctid as *mut u32) =
+                child_tid as u32;
         }
 
         //更改用户栈
@@ -159,19 +169,47 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    
+
     if !args_vec.contains(&path) {
         args_vec.insert(0, path.clone())
     }
-    
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
         .work_path
         .to_string();
-    
+
     let process = current_process();
-    match path.as_str() {
+    if let Some(app_inode) = open_file(
+        &work_path,
+        path.as_str(),
+        OpenFlags::RDONLY,
+        FileType::Regular,
+    ) {
+        let len = app_inode.get_size();
+        // let mut inner = process.inner_exclusive_access();
+        let fd = process.inner_exclusive_access().alloc_fd();
+        process.inner_exclusive_access().fd_table[fd] =
+            Some(FileDescriptor::Regular(app_inode));
+        // drop(inner);
+        let fd_table = process.inner_exclusive_access().fd_table.clone();
+        // println!("[debug] before kmmap:");
+        // crate::mm::get_rest();
+        let elf_buf = process.kmmap(0, len, fd, 0, 0, &fd_table);
+        let argc = args_vec.len();
+        unsafe {
+            let elf_ref = slice::from_raw_parts(elf_buf as *const u8, len);
+            process.exec(elf_ref, args_vec);
+        }
+        // println!("[debug] after kmmap:");
+        // crate::mm::get_rest();
+        process.kmunmap(elf_buf, len);
+        process.inner_exclusive_access().fd_table[fd] = None;
+        0
+    } else {
+        -1
+    }
+    // match path.as_str() {
         //"runtest.exe" => {
         //    let data_lock = TEST_SH_DATA.exclusive_access();
         //    let data = data_lock.as_slice();
@@ -184,7 +222,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         //    process.exec(data, args_vec);
         //    0
         //}
-        _ => {
+        // _ => {
             // if let Some(app_inode) = open_file(
             //     &work_path,
             //     path.as_str(),
@@ -193,42 +231,14 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             // ) {
             //     let all_data = app_inode.read_all();
             //     process.exec(&all_data, args_vec);
-            
+
             //     // return argc because cx.x[10] will be covered with it later
             //     0
             // } else {
             //     -1
             // }
-            if let Some(app_inode) = open_file(
-                &work_path,
-                path.as_str(),
-                OpenFlags::RDONLY,
-                FileType::Regular,
-            ) {
-                let len = app_inode.get_size();
-                // let mut inner = process.inner_exclusive_access();
-                let fd = process.inner_exclusive_access().alloc_fd();
-                process.inner_exclusive_access().fd_table[fd] = Some(FileDescriptor::Regular(app_inode));
-                // drop(inner);
-                let fd_table = process.inner_exclusive_access().fd_table.clone();
-                // println!("[debug] before kmmap:");
-                // crate::mm::get_rest();
-                let elf_buf = process.kmmap(0, len, fd, 0, 0, &fd_table);
-                let argc = args_vec.len();
-                unsafe {
-                    let elf_ref = slice::from_raw_parts(elf_buf as *const u8, len);
-                    process.exec(elf_ref, args_vec);
-                }
-                // println!("[debug] after kmmap:");
-                // crate::mm::get_rest();
-                process.kmunmap(elf_buf, len);
-                process.inner_exclusive_access().fd_table[fd] = None;
-                0
-            } else {
-                -1
-            }
-        }
-    }
+    //     }
+    // }
 }
 
 /// If there is not a child process whose pid is same as given, return -1.
@@ -241,7 +251,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
             let process = current_process();
             let mut inner = process.inner_exclusive_access();
             let token = inner.get_user_token();
-    
+
             if !inner
                 .children
                 .iter()
@@ -250,7 +260,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                 found = false;
                 // ---- release current PCB
             }
-    
+
             if found {
                 let pair = inner.children.iter().enumerate().find(|(_, p)| {
                     // println!("{}", color!(format!("[waitpid] wait pid: 3"), WARNING));
@@ -260,13 +270,13 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
                     drop(inner);
                     flag
                 });
-        
+
                 if let Some((idx, _)) = pair {
                     let child = inner.children.remove(idx);
                     assert_eq!(Arc::strong_count(&child), 1);
                     let found_pid = child.getpid();
                     let exit_code = child.inner_exclusive_access().exit_code;
-            
+
                     if exit_code_ptr as usize != 0 {
                         *translated_refmut(token, exit_code_ptr) = (exit_code & 0xff) << 8;
                     }
@@ -278,7 +288,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
         }
         assert!(!found || !exited);
         suspend_current_and_run_next();
-    
+
         //let process = current_process();
         //// find a child process
         //
@@ -360,7 +370,7 @@ pub fn sys_brk(addr: usize) -> isize {
         let mut old_end = inner.memory_set.heap_end.0;
         let align_end = align_up(addr);
         inner.memory_set.heap_end = align_end.into();
-    
+
         // remove lazy
         loop {
             if old_end >= align_end {
@@ -401,14 +411,16 @@ pub fn sys_mmap(
     //     "[mmap] start: {:#X}, len: {:#X}, flag: {:#X}",
     //     align_start, align_len, flags
     // );
-    drop(inner);
-    process.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
+    inner.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
     align_start as isize
 }
 
 pub fn sys_munmap(start: usize, len: usize) -> isize {
     let align_start = align_up(start);
-    if current_process().munmap(align_start, len) {
+    if current_process()
+        .inner_exclusive_access()
+        .munmap(align_start, len)
+    {
         0
     } else {
         -1
@@ -465,16 +477,16 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     } else {
         return -1;
     };
-    
+
     let act = act as *mut SigAction;
     let oldact = oldact as *mut SigAction;
-    
+
     let token = current_user_token();
     let task = current_task().unwrap();
     let mut task_inner = task.inner_exclusive_access();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    
+
     // 将原来的sigaction保存到oldact地址中
     if let Some(old_sigaction) = process_inner.signal_actions.actions[signum] {
         if oldact as usize != 0 {
@@ -484,7 +496,7 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     } else if oldact as usize != 0 {
         *translated_refmut(token, oldact) = SigAction::default();
     }
-    
+
     // 保存新的sigaction
     if act as usize != 0 {
         let sigaction = *translated_ref(token, act);
@@ -492,7 +504,7 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
         // println!("[sigaction] tid: {} sigaction: {:#X}, signum: {}", task.gettid(), sigaction.sa_handler, signum);
         process_inner.signal_actions.actions[signum] = Some(sigaction);
     }
-    
+
     0
 }
 
@@ -501,11 +513,11 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
     let mut mask = inner.signal_masks.bits();
-    
+
     if old_set as usize != 0 {
         *translated_refmut(token, old_set) = mask;
     }
-    
+
     if set as usize != 0 {
         let new_set = *translated_ref(token, set);
         match how {
@@ -526,18 +538,18 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
     if set as usize == 0 {
         return -1;
     }
-    
+
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let token = inner.get_user_token();
-    
+
     if timeout as usize == 0 {
         return -1;
     }
     let timeout = translated_refmut(token, timeout as *mut TimeSpec).to_nsec();
-    
+
     let info = (info as usize != 0).then_some(translated_refmut(token, info as *mut SigInfo));
-    
+
     let start = get_time_ns();
     while *translated_refmut(token, set) == 0 {
         let now = get_time_ns();
@@ -545,9 +557,9 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
             return -1;
         }
     }
-    
+
     let set = Signum::from_bits(*translated_refmut(token, set) as u64).unwrap();
-    
+
     for serial in 1..MAX_SIG {
         if set.contains(Signum::from_serial(serial).unwrap()) {
             if let Some(info) = info {
@@ -558,7 +570,7 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
             return serial as isize;
         }
     }
-    
+
     -1
 }
 
@@ -567,19 +579,19 @@ pub fn sys_sigreturn() -> isize {
     let task = current_task().unwrap();
     let tid = task.gettid();
     let mut task_inner = task.inner_exclusive_access();
-    
+
     // 取消当前正在响应的信号
     task_inner.signal_handling = 0;
-    
+
     // 将备份的trap上下文恢复
     let trap_cx = task_inner.get_trap_cx();
     let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
     let mc_pc = *translated_ref(token, mc_pc_ptr as *mut u64) as usize;
     *trap_cx = task_inner.trap_ctx_backup.unwrap();
     trap_cx.sepc = mc_pc;
-    
+
     // println!("[sigreturn] tid: {}, new_pc: {:#X}", tid, trap_cx.sepc);
-    
+
     0
 }
 
@@ -664,7 +676,7 @@ pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
     }
     let pcb = current_process();
     let memory_set = &mut pcb.inner_exclusive_access().memory_set;
-    
+
     let start_vpn = addr / PAGE_SIZE;
     for i in 0..(len / PAGE_SIZE) {
         let vpn = start_vpn + i;

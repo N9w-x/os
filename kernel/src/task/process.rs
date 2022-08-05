@@ -7,20 +7,20 @@ use spin::Mutex;
 
 use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, FD_MAX, MAP_FIXED, MEMORY_MAP_BASE, PAGE_SIZE};
 use crate::fs::{
-    File, FileDescriptor, FileType, open_file, OpenFlags, OSInode, Stdin, Stdout, WorkPath,
+    open_file, File, FileDescriptor, FileType, OSInode, OpenFlags, Stdin, Stdout, WorkPath,
 };
 use crate::mm::{
-    AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet, align_up,
-    translated_byte_buffer, translated_ref, translated_refmut, UserBuffer, VirtAddr, VirtPageNum, VPNRange,
+    align_up, translated_byte_buffer, translated_ref, translated_refmut, AuxHeader, MapPermission,
+    MemoryMapArea, MemorySet, UserBuffer, VPNRange, VirtAddr, VirtPageNum, KERNEL_SPACE,
 };
 use crate::task::SignalStruct;
 use crate::trap::{trap_handler, TrapContext};
 
-use super::{add_task, current_user_token, ITimerVal, Signum};
-use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::{insert_into_pid2process, insert_into_tid2task};
 use super::TaskControlBlock;
+use super::{add_task, current_user_token, ITimerVal, Signum};
+use super::{pid_alloc, PidHandle};
 
 const AT_FD_CWD: isize = -100;
 
@@ -61,7 +61,7 @@ impl ProcessControlBlockInner {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-    
+
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -70,7 +70,7 @@ impl ProcessControlBlockInner {
             self.fd_table.len() - 1
         }
     }
-    
+
     // alloc a specific new_fd
     pub fn alloc_specific_fd(&mut self, new_fd: usize) -> usize {
         for _ in self.fd_table.len()..=new_fd {
@@ -78,57 +78,178 @@ impl ProcessControlBlockInner {
         }
         new_fd
     }
-    
+
     pub fn alloc_id(&mut self) -> usize {
         self.task_res_allocator.alloc()
     }
-    
+
     pub fn dealloc_id(&mut self, id: usize) {
         self.task_res_allocator.dealloc(id)
     }
-    
+
     pub fn thread_count(&self) -> usize {
         self.tasks.len()
     }
-    
+
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
 
-    // pub fn mmap(
-    //     &mut self,
-    //     start: usize,
-    //     len: usize,
-    //     prot: usize,
-    //     flags: usize,
-    //     fd: usize,
-    //     offset: usize,
-    // ) {
-    //     let start_va = start.into();
-    //     let end_va = (start + len).into();
-    //     // 测例prot定义与MapPermission正好差一位
-    //     let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
+    pub fn mmap(
+        &mut self,
+        start: usize,
+        len: usize,
+        prot: usize,
+        flags: usize,
+        fd: usize,
+        offset: usize,
+    ) {
+        let start_va = start.into();
+        let end_va = (start + len).into();
+        // 测例prot定义与MapPermission正好差一位
+        let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
+        let fd_table = self.fd_table.clone();
+        // overlap
+        if flags & MAP_FIXED != 0 {
+            let start_vpn = VirtPageNum::from(start_va);
+            let end_vpn = VirtPageNum::from(end_va);
+            // TODO 可能有部分区间重叠情况考虑不到位
+            let mut old_perm = MapPermission::U;
+            let mut old_start = VirtAddr::from(0).floor();
+            let mut old_end = VirtAddr::from(0).floor();
+            let mut old_flags = 0usize;
+            let mut old_fd = 0usize;
+            let mut old_offset = 0usize;
+            loop {
+                let mut loop_flag = true;
+                for mmap_area in self.memory_set.mmap_areas.iter() {
+                    // 在此处提取old_area相关信息
+                    // 1                  1
+                    // fix area        |----- - -
+                    // old area           |----|
+                    // 3                    3
+                    // fix area          |-- - - -
+                    // old area        |-----|
+                    if (start_vpn < mmap_area.vpn_range.get_start()
+                        && end_vpn > mmap_area.vpn_range.get_start())
+                        || (start_vpn >= mmap_area.vpn_range.get_start()
+                            && start_vpn < mmap_area.vpn_range.get_end())
+                    {
+                        old_perm = mmap_area.map_perm;
+                        old_start = mmap_area.vpn_range.get_start();
+                        old_end = mmap_area.vpn_range.get_end();
+                        old_flags = mmap_area.flags;
+                        old_offset = mmap_area.offset;
+                        old_fd = mmap_area.fd;
+                        loop_flag = false;
+                    }
+                }
+                if loop_flag {
+                    break;
+                }
+                self.memory_set.remove_mmap_area(old_start);
+                // fix area        |-----|
+                // old area           |----|
+                if start_vpn <= old_start && end_vpn > old_start && end_vpn < old_end {
+                    let u_old_start: usize = old_start.into();
+                    // 向上取整页
+                    old_offset = old_offset
+                        + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
+                    old_start = VirtAddr::from(start + len).ceil();
+                    self.memory_set.insert_mmap_area(MemoryMapArea::new(
+                        old_start.into(),
+                        old_end.into(),
+                        old_perm,
+                        old_flags,
+                        old_fd,
+                        old_offset,
+                    ));
+                    self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                } else
+                // fix area        |----------|
+                // old area           |----|
+                // 刚好完全覆盖的情况也在此处
+                if start_vpn <= old_start && end_vpn >= old_end {
+                    // TODO
+                } else
+                // fix area          |--|
+                // old area        |-----|
+                if start_vpn >= old_start && end_vpn <= old_end {
+                    if end_vpn != old_end {
+                        // 向上取整页
+                        let u_old_start: usize = old_start.into();
+                        let part3_offset = old_offset
+                            + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
+                        let part3_start = VirtAddr::from(start + len).ceil();
+                        let part3_end = old_end;
+                        let part3_perm = old_perm;
+                        let part3_flags = old_flags;
+                        let part3_fd = old_fd;
+                        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+                            part3_start.into(),
+                            part3_end.into(),
+                            part3_perm,
+                            part3_flags,
+                            part3_fd,
+                            part3_offset,
+                        ));
+                        self.memory_set
+                            .alloc_mmap_area(part3_start.into(), &fd_table);
+                    }
 
-    //     self.memory_set
-    //         .insert_mmap_area(start_va, end_va, map_perm, fd, offset, flags);
-    //     self.memory_set.mmap_area_end = end_va;
-    // }
+                    if start_vpn != old_start {
+                        // 原区域作为第一段
+                        old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
+                        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+                            old_start.into(),
+                            old_end.into(),
+                            old_perm,
+                            old_flags,
+                            old_fd,
+                            old_offset,
+                        ));
+                        self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                    }
+                } else
+                // fix area          |-------|
+                // old area        |-----|
+                if start_vpn > old_start && end_vpn > old_end {
+                    // 原区域作为第一段
+                    old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
+                    self.memory_set.insert_mmap_area(MemoryMapArea::new(
+                        old_start.into(),
+                        old_end.into(),
+                        old_perm,
+                        old_flags,
+                        old_fd,
+                        old_offset,
+                    ));
+                    self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                }
+            }
+        }
+        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+            start_va, end_va, map_perm, fd, offset, flags,
+        ));
+        self.memory_set.mmap_area_end = self.memory_set.mmap_area_end.max(end_va);
+        self.memory_set.alloc_mmap_area(start_va, &fd_table);
+    }
 
-    // pub fn munmap(&mut self, start: usize, len: usize) -> bool {
-    //     let start_vpn = VirtPageNum::from(VirtAddr::from(start));
-    //     self.memory_set.remove_mmap_area(start_vpn)
-    // }
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
+        self.memory_set.remove_mmap_area(start_vpn)
+    }
 }
 
 impl ProcessControlBlock {
     pub fn is_locked(&self) -> bool {
         self.inner.is_locked()
     }
-    
+
     pub fn inner_exclusive_access(&self) -> spin::MutexGuard<'_, ProcessControlBlockInner> {
         self.inner.lock()
     }
-    
+
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
@@ -200,7 +321,7 @@ impl ProcessControlBlock {
         add_task(task);
         process
     }
-    
+
     /// Only support processes with a single thread.
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
@@ -356,7 +477,7 @@ impl ProcessControlBlock {
         trap_cx.x[13] = aux_base; //auxv
         *task_inner.get_trap_cx() = trap_cx;
     }
-    
+
     /// Only support processes with a single thread.
     pub fn fork(self: &Arc<Self>) -> Arc<Self> {
         let mut parent = self.inner_exclusive_access();
@@ -441,7 +562,7 @@ impl ProcessControlBlock {
         add_task(task);
         child
     }
-    
+
     pub fn clone_thread(
         self: &Arc<Self>,
         parent_task: Arc<TaskControlBlock>,
@@ -456,7 +577,7 @@ impl ProcessControlBlock {
                 .ustack_base(),
             true,
         ));
-        
+
         // attach task to child process
         let task_id = task.get_task_id();
         let tasks = &mut self.inner_exclusive_access().tasks;
@@ -464,187 +585,22 @@ impl ProcessControlBlock {
             tasks.push(None);
         }
         tasks[task_id] = Some(Arc::clone(&task));
-        
+
         // modify kstack_top in trap_cx of this thread
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
         *trap_cx = *parent_task.inner_exclusive_access().get_trap_cx();
         trap_cx.kernel_sp = task.kstack.get_top();
-        
+
         drop(task_inner);
         insert_into_tid2task(task.gettid(), Arc::clone(&task));
         add_task(Arc::clone(&task));
-        
+
         task
     }
-    
+
     pub fn getpid(&self) -> usize {
         self.pid.0
-    }
-    
-    pub fn mmap(
-        &self,
-        start: usize,
-        len: usize,
-        prot: usize,
-        flags: usize,
-        fd: usize,
-        offset: usize,
-    ) {
-        let start_va = start.into();
-        let end_va = (start + len).into();
-        // 测例prot定义与MapPermission正好差一位
-        let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
-        let fd_table = self.inner_exclusive_access().fd_table.clone();
-        // overlap
-        if flags & MAP_FIXED != 0 {
-            let start_vpn = VirtPageNum::from(start_va);
-            let end_vpn = VirtPageNum::from(end_va);
-            // TODO 可能有部分区间重叠情况考虑不到位
-            let mut old_perm = MapPermission::U;
-            let mut old_start = VirtAddr::from(0).floor();
-            let mut old_end = VirtAddr::from(0).floor();
-            let mut old_flags = 0usize;
-            let mut old_fd = 0usize;
-            let mut old_offset = 0usize;
-            loop {
-                let mut loop_flag = true;
-                for mmap_area in self.inner_exclusive_access().memory_set.mmap_areas.iter() {
-                    // 在此处提取old_area相关信息
-                    // 1                  1
-                    // fix area        |----- - -
-                    // old area           |----|
-                    // 3                    3
-                    // fix area          |-- - - -
-                    // old area        |-----|
-                    if (start_vpn < mmap_area.vpn_range.get_start()
-                        && end_vpn > mmap_area.vpn_range.get_start())
-                        || (start_vpn >= mmap_area.vpn_range.get_start()
-                        && start_vpn < mmap_area.vpn_range.get_end())
-                    {
-                        old_perm = mmap_area.map_perm;
-                        old_start = mmap_area.vpn_range.get_start();
-                        old_end = mmap_area.vpn_range.get_end();
-                        old_flags = mmap_area.flags;
-                        old_offset = mmap_area.offset;
-                        old_fd = mmap_area.fd;
-                        loop_flag = false;
-                    }
-                }
-                if loop_flag {
-                    break;
-                }
-                self.inner_exclusive_access()
-                    .memory_set
-                    .remove_mmap_area(old_start);
-                // fix area        |-----|
-                // old area           |----|
-                if start_vpn <= old_start && end_vpn > old_start && end_vpn < old_end {
-                    let u_old_start: usize = old_start.into();
-                    // 向上取整页
-                    old_offset = old_offset
-                        + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
-                    old_start = VirtAddr::from(start + len).ceil();
-                    self.inner_exclusive_access()
-                        .memory_set
-                        .insert_mmap_area(MemoryMapArea::new(
-                            old_start.into(),
-                            old_end.into(),
-                            old_perm,
-                            old_flags,
-                            old_fd,
-                            old_offset,
-                        ));
-                    self.inner_exclusive_access()
-                        .memory_set
-                        .alloc_mmap_area(old_start.into(), &fd_table);
-                } else
-                // fix area        |----------|
-                // old area           |----|
-                // 刚好完全覆盖的情况也在此处
-                if start_vpn <= old_start && end_vpn >= old_end {
-                    // TODO
-                } else
-                // fix area          |--|
-                // old area        |-----|
-                if start_vpn >= old_start && end_vpn <= old_end {
-                    if end_vpn != old_end {
-                        // 向上取整页
-                        let u_old_start: usize = old_start.into();
-                        let part3_offset = old_offset
-                            + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
-                        let part3_start = VirtAddr::from(start + len).ceil();
-                        let part3_end = old_end;
-                        let part3_perm = old_perm;
-                        let part3_flags = old_flags;
-                        let part3_fd = old_fd;
-                        self.inner_exclusive_access().memory_set.insert_mmap_area(
-                            MemoryMapArea::new(
-                                part3_start.into(),
-                                part3_end.into(),
-                                part3_perm,
-                                part3_flags,
-                                part3_fd,
-                                part3_offset,
-                            ),
-                        );
-                        self.inner_exclusive_access()
-                            .memory_set
-                            .alloc_mmap_area(part3_start.into(), &fd_table);
-                    }
-            
-                    if start_vpn != old_start {
-                        // 原区域作为第一段
-                        old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
-                        self.inner_exclusive_access().memory_set.insert_mmap_area(
-                            MemoryMapArea::new(
-                                old_start.into(),
-                                old_end.into(),
-                                old_perm,
-                                old_flags,
-                                old_fd,
-                                old_offset,
-                            ),
-                        );
-                        self.inner_exclusive_access()
-                            .memory_set
-                            .alloc_mmap_area(old_start.into(), &fd_table);
-                    }
-                } else
-                // fix area          |-------|
-                // old area        |-----|
-                if start_vpn > old_start && end_vpn > old_end {
-                    // 原区域作为第一段
-                    old_end = VirtAddr::from(start + PAGE_SIZE - 1).floor();
-                    self.inner_exclusive_access()
-                        .memory_set
-                        .insert_mmap_area(MemoryMapArea::new(
-                            old_start.into(),
-                            old_end.into(),
-                            old_perm,
-                            old_flags,
-                            old_fd,
-                            old_offset,
-                        ));
-                    self.inner_exclusive_access()
-                        .memory_set
-                        .alloc_mmap_area(old_start.into(), &fd_table);
-                }
-            }
-        }
-        let mut inner = self.inner_exclusive_access();
-        inner.memory_set.insert_mmap_area(MemoryMapArea::new(
-            start_va, end_va, map_perm, fd, offset, flags,
-        ));
-        inner.memory_set.mmap_area_end = inner.memory_set.mmap_area_end.max(end_va);
-        inner.memory_set.alloc_mmap_area(start_va, &fd_table);
-    }
-    
-    pub fn munmap(&self, start: usize, len: usize) -> bool {
-        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
-        self.inner_exclusive_access()
-            .memory_set
-            .remove_mmap_area(start_vpn)
     }
 
     pub fn kmmap(
@@ -660,15 +616,7 @@ impl ProcessControlBlock {
         let start_va: VirtAddr = kernel_space.mmap_area_end.into();
         let end_va = VirtAddr::from(start_va.0 + len);
         let token = kernel_space.token();
-        kernel_space.insert_kmmap_area(
-            start_va,
-            end_va,
-            MapPermission::W | MapPermission::R,
-            fd,
-            offset,
-            flags,
-            fd_table,
-        );
+        kernel_space.insert_kmmap_area(start_va, end_va, fd, offset, flags, fd_table);
         kernel_space.mmap_area_end = end_va;
         start_va.0
     }
@@ -676,7 +624,7 @@ impl ProcessControlBlock {
     pub fn kmunmap(&self, start: usize, len: usize) -> bool {
         let start_vpn = VirtPageNum::from(VirtAddr::from(start));
         let mut kernel_space = KERNEL_SPACE.lock();
-        let ret = kernel_space.remove_mmap_area(start_vpn);
+        let ret = kernel_space.remove_kmmap_area(start_vpn);
         kernel_space.mmap_area_end = VirtAddr::from(start);
         ret
     }
