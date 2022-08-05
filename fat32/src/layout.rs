@@ -443,22 +443,21 @@ impl ShortDirEntry {
     pub fn get_pos(
         &self,
         offset: usize,
-        manager: &Arc<RwLock<FAT32Manager>>,
+        manager: &Arc<FAT32Manager>,
         fat: &Arc<RwLock<FAT>>,
         block_device: &Arc<dyn BlockDevice>,
     ) -> (u32, usize, usize) {
-        let manager_reader = manager.read();
         let fat_reader = fat.read();
-        let bytes_per_sector = manager_reader.bytes_per_sector() as usize;
-        let bytes_per_cluster = manager_reader.bytes_per_cluster() as usize;
-        let cluster_index = manager_reader.cluster_of_offset(offset);
+        let bytes_per_sector = manager.bytes_per_sector() as usize;
+        let bytes_per_cluster = manager.bytes_per_cluster() as usize;
+        let cluster_index = manager.cluster_of_offset(offset);
         let current_cluster = fat_reader.get_cluster_at(
             self.first_cluster(),
             cluster_index,
             Arc::clone(block_device),
         );
         //println!("*** in get pos, cluster index = {}, current cluster = {}, first_cluster = {}", cluster_index, current_cluster, self.first_cluster());
-        let current_sector = manager_reader.first_sector_of_cluster(current_cluster)
+        let current_sector = manager.first_sector_of_cluster(current_cluster)
             + (offset - cluster_index as usize * bytes_per_cluster)
             / bytes_per_sector;
         (current_cluster, current_sector, offset % bytes_per_sector)
@@ -469,16 +468,15 @@ impl ShortDirEntry {
         &self,
         offset: usize,
         buf: &mut [u8],
-        manager: &Arc<RwLock<FAT32Manager>>,
+        manager: &Arc<FAT32Manager>,
         fat: &Arc<RwLock<FAT>>,
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
         //println!("========================================================\nin read_at self.first_cluster={}", self.first_cluster());
         // 获取共享锁
-        let manager_reader = manager.read();
         let fat_reader = fat.read();
-        let bytes_per_sector = manager_reader.bytes_per_sector() as usize;
-        let bytes_per_cluster = manager_reader.bytes_per_cluster() as usize;
+        let bytes_per_sector = manager.bytes_per_sector() as usize;
+        let bytes_per_cluster = manager.bytes_per_cluster() as usize;
         let mut current_off = offset;
         //println!("size = {}",self.size);
         let end: usize;
@@ -497,7 +495,7 @@ impl ShortDirEntry {
         // let cluster_index = manager_reader.cluster_of_offset(offset);
         let (c_clu, c_sec, _) = self.get_pos(
             offset, manager,
-            &manager_reader.get_fat(),
+            fat,
             block_device,
         );
         //println!("curr_clu = {} sec = {}", c_clu, c_sec);
@@ -560,7 +558,7 @@ impl ShortDirEntry {
                 if current_cluster >= END_CLUSTER { break; } //没有下一个簇
                 //println!("read at current_cluster = {}", current_cluster);
                 // 计算所在扇区
-                current_sector = manager_reader.first_sector_of_cluster(current_cluster);
+                current_sector = manager.first_sector_of_cluster(current_cluster);
                 //println!("read at current_sector = {}", current_sector);
                 //let mut guess = String::new();
                 //std::io::stdin().read_line(&mut guess).expect("Failed to read line");
@@ -576,16 +574,15 @@ impl ShortDirEntry {
         &self,
         offset: usize,
         buf: &[u8],
-        manager: &Arc<RwLock<FAT32Manager>>,
+        manager: &Arc<FAT32Manager>,
         fat: &Arc<RwLock<FAT>>,
         block_device: &Arc<dyn BlockDevice>,
     ) -> usize {
         //println!("in w_short");
         // 获取共享锁
-        let manager_reader = manager.read();
         let fat_reader = fat.read();
-        let bytes_per_sector = manager_reader.bytes_per_sector() as usize;
-        let bytes_per_cluster = manager_reader.bytes_per_cluster() as usize;
+        let bytes_per_sector = manager.bytes_per_sector() as usize;
+        let bytes_per_cluster = manager.bytes_per_cluster() as usize;
         let mut current_off = offset;
         let end: usize;
         if self.is_dir() {
@@ -611,7 +608,7 @@ impl ShortDirEntry {
         */
         let (c_clu, c_sec, _) = self.get_pos(
             offset, manager,
-            &manager_reader.get_fat(),
+            &manager.get_fat(),
             block_device,
         );
         let mut current_cluster = c_clu;
@@ -666,7 +663,7 @@ impl ShortDirEntry {
                 } //没有下一个簇
                 // 计算所在扇区
                 //println!("write at current_cluster = {}", current_cluster);
-                current_sector = manager_reader.first_sector_of_cluster(current_cluster);
+                current_sector = manager.first_sector_of_cluster(current_cluster);
                 //println!("write at current_sector = {}", current_sector);
                 //let mut guess = String::new();
                 //std::io::stdin().read_line(&mut guess).expect("Failed to read line");

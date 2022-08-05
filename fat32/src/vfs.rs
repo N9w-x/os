@@ -9,18 +9,20 @@ use super::{
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use spin::RwLock;
+
 
 #[derive(Clone)]
 pub struct VFile {
     name: String,
     short_sector: usize,
-    short_offset: usize,               //文件短目录项所在扇区和偏移
-    long_pos_vec: Vec<(usize, usize)>, // 长目录项的位置<sector, offset>
+    short_offset: usize,
+    //文件短目录项所在扇区和偏移
+    long_pos_vec: Vec<(usize, usize)>,
+    // 长目录项的位置<sector, offset>
     //first_cluster: u32,
     attribute: u8,
     //size:u32,
-    fs: Arc<RwLock<FAT32Manager>>,
+    fs: Arc<FAT32Manager>,
     block_device: Arc<dyn BlockDevice>,
 }
 
@@ -38,8 +40,7 @@ impl VFile {
         long_pos_vec: Vec<(usize, usize)>,
         //first_cluster: u32,
         attribute: u8,
-        size: u32,
-        fs: Arc<RwLock<FAT32Manager>>,
+        fs: Arc<FAT32Manager>,
         block_device: Arc<dyn BlockDevice>,
     ) -> Self {
         Self {
@@ -54,47 +55,38 @@ impl VFile {
             block_device,
         }
     }
-
+    
     pub fn clear_cache(&self) {
-        let fat = self.fs.read();
-        fat.cache_write_back();
+        self.fs.cache_write_back();
     }
-
+    
     pub fn get_name(&self) -> &str {
         self.name.as_str()
     }
-
+    
     pub fn get_attribute(&self) -> u8 {
         self.attribute
     }
-
+    
     pub fn get_size(&self) -> u32 {
         self.read_short_dirent(|se: &ShortDirEntry| se.get_size())
     }
-
-    pub fn get_fs(&self) -> Arc<RwLock<FAT32Manager>> {
+    
+    pub fn get_fs(&self) -> Arc<FAT32Manager> {
         self.fs.clone()
     }
-
+    
     pub fn is_dir(&self) -> bool {
-        if 0 != (self.attribute & ATTRIBUTE_DIRECTORY) {
-            true
-        } else {
-            false
-        }
+        0 != (self.attribute & ATTRIBUTE_DIRECTORY)
     }
-
+    
     pub fn is_short(&self) -> bool {
-        if self.long_pos_vec.len() == 0 {
-            true
-        } else {
-            false
-        }
+        self.long_pos_vec.is_empty()
     }
-
+    
     pub fn read_short_dirent<V>(&self, f: impl FnOnce(&ShortDirEntry) -> V) -> V {
         if self.short_sector == 0 {
-            let root_dirent = self.fs.read().get_root_dirent();
+            let root_dirent = self.fs.get_root_dirent();
             let rr = root_dirent.read();
             f(&rr)
         } else {
@@ -103,22 +95,22 @@ impl VFile {
                 self.block_device.clone(),
                 CacheMode::READ,
             )
-            .read()
-            .read(self.short_offset, f)
+                .read()
+                .read(self.short_offset, f)
         }
     }
-
+    
     fn modify_long_dirent<V>(&self, index: usize, f: impl FnOnce(&mut LongDirEntry) -> V) -> V {
         let (sector, offset) = self.long_pos_vec[index];
         get_info_cache(sector, self.block_device.clone(), CacheMode::READ)
             .write()
             .modify(offset, f)
     }
-
+    
     pub fn modify_short_dirent<V>(&self, f: impl FnOnce(&mut ShortDirEntry) -> V) -> V {
         if self.short_sector == 0 {
             //println!("[fs]: modify vroot dent");
-            let root_dirent = self.fs.read().get_root_dirent();
+            let root_dirent = self.fs.get_root_dirent();
             let mut rw = root_dirent.write();
             f(&mut rw)
         } else {
@@ -127,26 +119,26 @@ impl VFile {
                 self.block_device.clone(),
                 CacheMode::READ,
             )
-            .write()
-            .modify(self.short_offset, f)
+                .write()
+                .modify(self.short_offset, f)
         }
     }
-
+    
     /* 返回sector和offset */
     pub fn get_pos(&self, offset: usize) -> (usize, usize) {
         let (_, sec, off) = self.read_short_dirent(|s_ent: &ShortDirEntry| {
             s_ent.get_pos(
                 offset,
                 &self.fs,
-                &self.fs.read().get_fat(),
+                &self.fs.get_fat(),
                 &self.block_device,
             )
         });
         (sec, off)
     }
-
+    
     fn find_long_name(&self, name: &str, dir_ent: &ShortDirEntry) -> Option<VFile> {
-        let name_vec = self.fs.read().long_name_split(name);
+        let name_vec = self.fs.long_name_split(name);
         let mut offset: usize = 0;
         let mut long_ent = LongDirEntry::empty();
         let long_ent_num = name_vec.len();
@@ -167,7 +159,7 @@ impl VFile {
                 offset,
                 long_ent.as_bytes_mut(),
                 &self.fs,
-                &self.fs.read().get_fat(),
+                &self.fs.get_fat(),
                 &self.block_device,
             );
             if read_sz != DIRENT_SZ || long_ent.is_empty() {
@@ -181,7 +173,7 @@ impl VFile {
                     offset += step * DIRENT_SZ;
                     continue;
                 }
-                order = order ^ 0x40;
+                order ^= 0x40;
                 if order as usize != long_ent_num {
                     offset += step * DIRENT_SZ;
                     continue;
@@ -193,7 +185,7 @@ impl VFile {
                         offset + i * DIRENT_SZ,
                         long_ent.as_bytes_mut(),
                         &self.fs,
-                        &self.fs.read().get_fat(),
+                        &self.fs.get_fat(),
                         &self.block_device,
                     );
                     if read_sz != DIRENT_SZ {
@@ -214,7 +206,7 @@ impl VFile {
                         s_off,
                         short_ent.as_bytes_mut(),
                         &self.fs,
-                        &self.fs.read().get_fat(),
+                        &self.fs.get_fat(),
                         &self.block_device,
                     );
                     if read_sz != DIRENT_SZ {
@@ -234,7 +226,6 @@ impl VFile {
                             long_pos_vec,
                             //short_ent.first_cluster(),
                             short_ent.attribute(),
-                            short_ent.get_size(),
                             self.fs.clone(),
                             self.block_device.clone(),
                         ));
@@ -250,7 +241,7 @@ impl VFile {
             }
         }
     }
-
+    
     fn find_short_name(&self, name: &str, dir_ent: &ShortDirEntry) -> Option<VFile> {
         let name_upper = name.to_ascii_uppercase();
         let mut short_ent = ShortDirEntry::empty();
@@ -261,81 +252,70 @@ impl VFile {
                 offset,
                 short_ent.as_bytes_mut(),
                 &self.fs,
-                &self.fs.read().get_fat(),
+                &self.fs.get_fat(),
                 &self.block_device,
             );
             if read_sz != DIRENT_SZ || short_ent.is_empty() {
                 return None;
+            } else if short_ent.is_valid() && name_upper == short_ent.get_name_uppercase() {
+                let (short_sector, short_offset) = self.get_pos(offset);
+                let long_pos_vec: Vec<(usize, usize)> = Vec::new();
+                return Some(VFile::new(
+                    String::from(name),
+                    short_sector,
+                    short_offset,
+                    long_pos_vec,
+                    short_ent.attribute(),
+                    self.fs.clone(),
+                    self.block_device.clone(),
+                ));
             } else {
-                if short_ent.is_valid() && name_upper == short_ent.get_name_uppercase() {
-                    let (short_sector, short_offset) = self.get_pos(offset);
-                    let long_pos_vec: Vec<(usize, usize)> = Vec::new();
-                    return Some(VFile::new(
-                        String::from(name),
-                        short_sector,
-                        short_offset,
-                        long_pos_vec,
-                        short_ent.attribute(),
-                        short_ent.get_size(),
-                        self.fs.clone(),
-                        self.block_device.clone(),
-                    ));
-                } else {
-                    offset += DIRENT_SZ;
-                    continue;
-                }
+                offset += DIRENT_SZ;
+                continue;
             }
         }
     }
-
+    
     /* 根据名称搜索当前目录下的文件 */
     pub fn find_vfile_byname(&self, name: &str) -> Option<VFile> {
         assert!(self.is_dir());
-        let mut name_and_ext: Vec<&str> = name.split(".").collect();
-        let name_ = name_and_ext[0].as_bytes();
+        let mut name_and_ext: Vec<&str> = name.split('.').collect();
+        let name_ = name_and_ext[0];
         if name_and_ext.len() == 1 {
             name_and_ext.push("");
         }
-        let ext_ = name_and_ext[1].as_bytes();
+        let ext_ = name_and_ext[1];
         // FAT32目录没有大小，只能搜，read_at已经做了完善的适配
         self.read_short_dirent(|short_ent: &ShortDirEntry| {
             if name_.len() > 8 || ext_.len() > 3 {
                 //长文件名
-                return self.find_long_name(name, short_ent);
+                self.find_long_name(name, short_ent)
             } else {
                 // 短文件名
-                return self.find_short_name(name, short_ent);
+                self.find_short_name(name, short_ent)
             }
         })
     }
-
+    
     /* 根据路径递归搜索文件 */
-    pub fn find_vfile_bypath(&self, path: Vec<&str>) -> Option<Arc<VFile>> {
-        let _ = self.fs.read(); // 获取读锁
-        let len = path.len();
-        if len == 0 {
-            return Some(Arc::new(self.clone()));
+    pub fn find_vfile_bypath(&self, path: &Vec<&str>) -> Option<Arc<VFile>> {
+        if path.is_empty() {
+            return None;
         }
         let mut current_vfile = self.clone();
-        for i in 0..len {
-            // DEBUG
-            // print!("\n");
-            if path[i] == "" || path[i] == "." {
+        for &path_part in path {
+            if path_part.is_empty() || path_part == "." {
                 continue;
             }
-            if let Some(vfile) = current_vfile.find_vfile_byname(path[i]) {
-                current_vfile = vfile;
-            } else {
-                return None;
-            }
+            current_vfile = current_vfile.find_vfile_byname(path_part)?;
         }
         Some(Arc::new(current_vfile))
     }
-
+    
     /* WAITING 既然目录都没有大小，那暂时没必要做这个 */
     #[allow(unused)]
     fn decrease_size() {}
-
+    
     fn increase_size(&self, new_size: u32) {
         // TODO: return sth when cannot increase
         //println!("===================== in increase =======================");
@@ -343,14 +323,13 @@ impl VFile {
         //println!("try lock");
         let first_cluster = self.first_cluster();
         let old_size = self.get_size();
-        let manager_writer = self.fs.write();
         //println!("get lock");
         if new_size <= old_size {
             //println!("oldsz > newsz");
             return;
         }
         let needed =
-            manager_writer.cluster_num_needed(old_size, new_size, self.is_dir(), first_cluster);
+            self.fs.cluster_num_needed(old_size, new_size, self.is_dir(), first_cluster);
         //println!("needed = {}", needed);
         if needed == 0 {
             if !self.is_dir() {
@@ -361,13 +340,12 @@ impl VFile {
             }
             return;
         }
-
+        
         //println!("first cluster = {} nxt = {}", first_cluster, manager_writer.get_fat().read().get_next_cluster(first_cluster, self.block_device.clone()));
-        if let Some(cluster) = manager_writer.alloc_cluster(needed) {
+        if let Some(cluster) = self.fs.alloc_cluster(needed) {
             //println!("*** cluster alloc = {}",cluster);
             if first_cluster == 0 {
                 //未分配簇
-                drop(manager_writer);
                 self.modify_short_dirent(|se: &mut ShortDirEntry| {
                     se.set_first_cluster(cluster);
                 });
@@ -378,7 +356,7 @@ impl VFile {
                 //let fs_reader = self.fs.read();
                 //println!("[fs-inc]: file: {}, newsz = {}", self.get_name(), new_size);
                 //println!("  cluster alloc = {}",cluster);
-                let fat = manager_writer.get_fat();
+                let fat = self.fs.get_fat();
                 //println!("try lock1");
                 let fat_writer = fat.write();
                 //println!("get lock1");
@@ -388,7 +366,6 @@ impl VFile {
                 fat_writer.set_next_cluster(final_cluster, cluster, self.block_device.clone());
                 //let allc = fat_writer.get_all_cluster_of(first_cluster, self.block_device.clone());
                 //println!("  finish set next cluster, cluster chain:{:?}", allc);
-                drop(manager_writer);
             }
             //self.size = new_size;
             self.modify_short_dirent(|se: &mut ShortDirEntry| {
@@ -398,7 +375,7 @@ impl VFile {
             panic!("SD Card no space!!!");
         }
     }
-
+    
     /*
     pub fn set_first_cluster(&mut self, first_cluster:u32) {
         self.first_cluster = first_cluster;
@@ -406,7 +383,7 @@ impl VFile {
             se.set_first_cluster(first_cluster);
         });
     }*/
-
+    
     /* 在当前目录下创建文件 */
     pub fn create(&self, name: &str, attribute: u8) -> Option<Arc<VFile>> {
         // 检测同名文件
@@ -415,7 +392,7 @@ impl VFile {
         //    //println!("already exist：{}",name);
         //    return None
         //}
-        let manager_reader = self.fs.read();
+        let manager_reader = self.fs.clone();
         let (name_, ext_) = manager_reader.split_name_ext(name);
         // 搜索空处
         let mut dirent_offset: usize;
@@ -462,19 +439,19 @@ impl VFile {
             self.write_at(dirent_offset, short_ent.as_bytes_mut()),
             DIRENT_SZ
         );
-
+        
         // 如果是目录类型，需要创建.和..
-
+        
         if let Some(vfile) = self.find_vfile_byname(name) {
             if attribute & ATTRIBUTE_DIRECTORY != 0 {
-                let manager_reader = self.fs.read();
+                let manager_reader = self.fs.clone();
                 let (name_bytes, ext_bytes) = manager_reader.short_name_format(".");
                 let mut self_dir = ShortDirEntry::new(&name_bytes, &ext_bytes, ATTRIBUTE_DIRECTORY);
                 let (name_bytes, ext_bytes) = manager_reader.short_name_format("..");
                 let mut par_dir = ShortDirEntry::new(&name_bytes, &ext_bytes, ATTRIBUTE_DIRECTORY);
                 drop(manager_reader);
                 par_dir.set_first_cluster(self.first_cluster());
-
+                
                 vfile.write_at(0, self_dir.as_bytes_mut());
                 vfile.write_at(DIRENT_SZ, par_dir.as_bytes_mut());
                 let first_cluster =
@@ -482,22 +459,22 @@ impl VFile {
                 self_dir.set_first_cluster(first_cluster);
                 vfile.write_at(0, self_dir.as_bytes_mut());
             }
-            return Some(Arc::new(vfile));
+            Some(Arc::new(vfile))
         } else {
             None
         }
     }
-
+    
     pub fn first_cluster(&self) -> u32 {
         self.read_short_dirent(|se: &ShortDirEntry| se.first_cluster())
     }
-
+    
     pub fn set_first_cluster(&self, clu: u32) {
         self.modify_short_dirent(|se: &mut ShortDirEntry| {
             se.set_first_cluster(clu);
         })
     }
-
+    
     /* 获取当前目录下的所有文件名以及属性，以Vector形式返回 */
     // 如果出现错误，返回None
     pub fn ls(&self) -> Option<Vec<(String, u8)>> {
@@ -514,7 +491,7 @@ impl VFile {
                     offset,
                     short_ent.as_bytes_mut(),
                     &self.fs,
-                    &self.fs.read().get_fat(),
+                    &self.fs.get_fat(),
                     &self.block_device,
                 )
             });
@@ -537,7 +514,7 @@ impl VFile {
                     offset += DIRENT_SZ;
                     continue;
                 } else {
-                    order = order ^ 0x40;
+                    order ^= 0x40;
                 }
                 let mut name = long_ent.get_name_raw();
                 #[allow(unused)]
@@ -548,7 +525,7 @@ impl VFile {
                             offset,
                             long_ent.as_bytes_mut(),
                             &self.fs,
-                            &self.fs.read().get_fat(),
+                            &self.fs.get_fat(),
                             &self.block_device,
                         )
                     });
@@ -565,7 +542,7 @@ impl VFile {
                         offset,
                         long_ent.as_bytes_mut(),
                         &self.fs,
-                        &self.fs.read().get_fat(),
+                        &self.fs.get_fat(),
                         &self.block_device,
                     )
                 });
@@ -583,7 +560,7 @@ impl VFile {
             }
         }
     }
-
+    
     /* 获取目录中offset处目录项的信息 TODO:之后考虑和stat复用
      * 返回<name, offset, firstcluster,attributes>
      */
@@ -602,7 +579,7 @@ impl VFile {
                     offset,
                     long_ent.as_bytes_mut(),
                     &self.fs,
-                    &self.fs.read().get_fat(),
+                    &self.fs.get_fat(),
                     &self.block_device,
                 )
             });
@@ -638,7 +615,7 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-
+    
     /* 获取目录中offset处目录项的信息 TODO:之后考虑和stat复用
      * 返回<size, atime, mtime, ctime>
      */
@@ -650,7 +627,7 @@ impl VFile {
             let mut size = sde.get_size();
             let first_clu = sde.first_cluster();
             if self.is_dir() {
-                let fs_reader = self.fs.read();
+                let fs_reader = self.fs.clone();
                 let fat = fs_reader.get_fat();
                 let fat_reader = fat.read();
                 let cluster_num =
@@ -667,7 +644,7 @@ impl VFile {
             )
         })
     }
-
+    
     /* ls精简版，上面那个又臭又长，但这个不保证可靠 */
     // DEBUG
     pub fn ls_lite(&self) -> Option<Vec<(String, u8)>> {
@@ -685,7 +662,7 @@ impl VFile {
                     offset,
                     long_ent.as_bytes_mut(),
                     &self.fs,
-                    &self.fs.read().get_fat(),
+                    &self.fs.get_fat(),
                     &self.block_device,
                 )
             });
@@ -718,19 +695,19 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-
+    
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
         self.read_short_dirent(|short_ent: &ShortDirEntry| {
             short_ent.read_at(
                 offset,
                 buf,
                 &self.fs,
-                &self.fs.read().get_fat(),
+                &self.fs.get_fat(),
                 &self.block_device,
             )
         })
     }
-
+    
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         self.increase_size((offset + buf.len()) as u32);
         self.modify_short_dirent(|short_ent: &mut ShortDirEntry| {
@@ -738,12 +715,12 @@ impl VFile {
                 offset,
                 buf,
                 &self.fs,
-                &self.fs.read().get_fat(),
+                &self.fs.get_fat(),
                 &self.block_device,
             )
         })
     }
-
+    
     pub fn clear(&self) {
         // 难点:长名目录项也要修改
         let first_cluster: u32 = self.first_cluster();
@@ -760,16 +737,14 @@ impl VFile {
         });
         let all_clusters = self
             .fs
-            .read()
             .get_fat()
             .read()
             .get_all_cluster_of(first_cluster, self.block_device.clone());
         //self.fs.write().dealloc_cluster(all_clusters);
-        let fs_reader = self.fs.read();
-        fs_reader.dealloc_cluster(all_clusters);
+        self.fs.dealloc_cluster(all_clusters);
         //fs_reader.cache_write_back();
     }
-
+    
     /* 查找可用目录项，返回offset，簇不够也会返回相应的offset，caller需要及时分配 */
     fn find_free_dirent(&self) -> Option<usize> {
         if !self.is_dir() {
@@ -786,7 +761,7 @@ impl VFile {
                     offset,
                     tmp_dirent.as_bytes_mut(),
                     &self.fs,
-                    &self.fs.read().get_fat(),
+                    &self.fs.get_fat(),
                     &self.block_device,
                 )
             });
@@ -796,25 +771,25 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-
+    
     pub fn creation_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_creation_time())
     }
-
+    
     pub fn accessed_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_accessed_time())
     }
-
+    
     pub fn modification_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_modification_time())
     }
-
+    
     pub fn set_delete_bit(&self) {
         self.modify_short_dirent(|se: &mut ShortDirEntry| {
             se.delete();
         })
     }
-
+    
     /* WAITING 目前只支持删除自己*/
     pub fn remove(&self) -> usize {
         //self.modify_short_dirent(|sdent: &mut ShortDirEntry|{
@@ -832,19 +807,18 @@ impl VFile {
         });
         let all_clusters = self
             .fs
-            .read()
             .get_fat()
             .read()
             .get_all_cluster_of(first_cluster, self.block_device.clone());
-        self.fs.write().dealloc_cluster(all_clusters.clone());
+        self.fs.dealloc_cluster(all_clusters.clone());
         //self.fs.write().cache_write_back();
-        return all_clusters.len();
+        all_clusters.len()
     }
-
+    
     /* WAITING */
     #[allow(unused)]
     fn remove_file() {}
-
+    
     /* WAITING */
     #[allow(unused)]
     fn remove_dir() {}
