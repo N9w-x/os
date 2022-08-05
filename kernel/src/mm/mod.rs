@@ -2,9 +2,8 @@ pub use address::{align_up, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPage
 pub use aux::AuxHeader;
 pub use frame_allocator::{add_free, frame_alloc, frame_dealloc, FrameTracker};
 pub use heap_allocator::get_rest;
-pub use memory_set::{KERNEL_SPACE, kernel_token, MapPermission, MemorySet};
-pub use memory_set::remap_test;
 pub use mmap::MemoryMapArea;
+pub use memory_set::{KERNEL_SPACE, MapPermission, MemorySet, KERNEL_TOKEN, remap_test};
 pub use page_table::{
     PageTable, PageTableEntry, PTEFlags, translated_byte_buffer, translated_ref, translated_refmut,
     translated_str, UserBuffer, UserBufferIterator,

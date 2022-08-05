@@ -1,5 +1,5 @@
 use crate::{
-    mm::kernel_token,
+    mm::KERNEL_TOKEN,
     task::{add_task, current_task, TaskControlBlock},
     trap::{trap_handler, TrapContext},
 };
@@ -34,7 +34,7 @@ pub fn sys_thread_create(entry: usize, arg: usize) -> isize {
     *new_task_trap_cx = TrapContext::app_init_context(
         entry,
         new_task_res.ustack_top(),
-        kernel_token(),
+        *KERNEL_TOKEN,
         new_task.kstack.get_top(),
         trap_handler as usize,
     );

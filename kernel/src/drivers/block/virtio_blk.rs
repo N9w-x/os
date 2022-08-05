@@ -5,7 +5,7 @@ use spin::Mutex;
 use virtio_drivers::{VirtIOBlk, VirtIOHeader};
 
 use crate::mm::{
-    frame_alloc, frame_dealloc, FrameTracker, kernel_token, PageTable, PhysAddr, PhysPageNum,
+    frame_alloc, frame_dealloc, KERNEL_TOKEN, FrameTracker, PageTable, PhysAddr, PhysPageNum,
     StepByOne, VirtAddr,
 };
 
@@ -81,7 +81,7 @@ pub extern "C" fn virtio_phys_to_virt(paddr: PhysAddr) -> VirtAddr {
 
 #[no_mangle]
 pub extern "C" fn virtio_virt_to_phys(vaddr: VirtAddr) -> PhysAddr {
-    PageTable::from_token(kernel_token())
+    PageTable::from_token(*KERNEL_TOKEN)
         .translate_va(vaddr)
         .unwrap()
 }
