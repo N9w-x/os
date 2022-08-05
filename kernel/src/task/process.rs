@@ -164,7 +164,7 @@ impl ProcessControlBlockInner {
                         old_fd,
                         old_offset,
                     ));
-                    self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                    // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                 } else
                 // fix area        |----------|
                 // old area           |----|
@@ -193,8 +193,7 @@ impl ProcessControlBlockInner {
                             part3_fd,
                             part3_offset,
                         ));
-                        self.memory_set
-                            .alloc_mmap_area(part3_start.into(), &fd_table);
+                        // self.memory_set.alloc_mmap_area(part3_start.into(), &fd_table);
                     }
 
                     if start_vpn != old_start {
@@ -208,7 +207,7 @@ impl ProcessControlBlockInner {
                             old_fd,
                             old_offset,
                         ));
-                        self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                        // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                     }
                 } else
                 // fix area          |-------|
@@ -224,7 +223,7 @@ impl ProcessControlBlockInner {
                         old_fd,
                         old_offset,
                     ));
-                    self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
+                    // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                 }
             }
         }
@@ -232,7 +231,7 @@ impl ProcessControlBlockInner {
             start_va, end_va, map_perm, fd, offset, flags,
         ));
         self.memory_set.mmap_area_end = self.memory_set.mmap_area_end.max(end_va);
-        self.memory_set.alloc_mmap_area(start_va, &fd_table);
+        // self.memory_set.alloc_mmap_area(start_va, &fd_table);
     }
 
     pub fn munmap(&mut self, start: usize, len: usize) -> bool {

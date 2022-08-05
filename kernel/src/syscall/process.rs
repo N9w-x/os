@@ -373,13 +373,13 @@ pub fn sys_brk(addr: usize) -> isize {
         inner.memory_set.heap_end = align_end.into();
 
         // remove lazy
-        loop {
-            if old_end >= align_end {
-                break;
-            }
-            inner.memory_set.lazy_alloc_heap(VirtAddr::from(old_end));
-            old_end += PAGE_SIZE;
-        }
+        // loop {
+        //     if old_end >= align_end {
+        //         break;
+        //     }
+        //     inner.memory_set.lazy_alloc_heap(VirtAddr::from(old_end));
+        //     old_end += PAGE_SIZE;
+        // }
         addr as isize
     }
 }

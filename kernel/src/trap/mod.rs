@@ -7,7 +7,7 @@ use riscv::register::{
 };
 
 pub use context::TrapContext;
-pub use lazy::lazy_check;
+pub use pagefault::lazy_check;
 
 use crate::config::TRAMPOLINE;
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
@@ -20,7 +20,7 @@ use crate::task::{
 use crate::timer::{check_timer, set_next_trigger};
 
 mod context;
-mod lazy;
+mod pagefault;
 
 global_asm!(include_str!("trap.S"));
 
@@ -115,21 +115,22 @@ pub fn trap_handler() -> ! {
             //
             //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
             //}
-            // if !lazy_check(stval) {
-            println!(
-                "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
-                scause.cause(),
-                stval,
-                current_trap_cx().sepc
-            );
-            current_add_signal(Signum::SIGSEGV);
-            // }
-            let process = current_process();
-            println!("this is mmap areas:");
-            process
-                .inner_exclusive_access()
-                .memory_set
-                .print_mmap_area();
+            // println!("{:#?}", current_trap_cx());
+            if !lazy_check(stval) {
+                println!(
+                    "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
+                    scause.cause(),
+                    stval,
+                    current_trap_cx().sepc
+                );
+                current_add_signal(Signum::SIGSEGV);
+                let process = current_process();
+                println!("this is mmap areas:");
+                process
+                    .inner_exclusive_access()
+                    .memory_set
+                    .print_mmap_area();
+            }
             unsafe {
                 asm!("sfence.vma");
                 asm!("fence.i");
@@ -175,6 +176,7 @@ pub fn trap_handler() -> ! {
 pub fn trap_return() -> ! {
     disable_supervisor_interrupt();
     set_user_trap_entry();
+    current_trap_cx().sstatus.set_spp(sstatus::SPP::User);
     let trap_cx_user_va = current_trap_cx_user_va();
     let user_satp = current_user_token();
     extern "C" {
