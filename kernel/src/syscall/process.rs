@@ -5,7 +5,7 @@ use core::mem::size_of;
 
 //use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 use crate::config::{
-    CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE,
+    CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE, MEMORY_MAP_BASE,
 };
 use crate::console::{ERROR, INFO, WARNING};
 use crate::fs::{open_file, File, FileDescriptor, FileType, OpenFlags};
@@ -13,6 +13,7 @@ use crate::mm::{
     align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str, PTEFlags,
     UserBuffer, VirtAddr, VirtPageNum,
 };
+use crate::syscall::errno::EPERM;
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
     add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
@@ -399,6 +400,9 @@ pub fn sys_mmap(
     } else {
         align_up(inner.memory_set.mmap_area_end.0)
     };
+    if align_start < MEMORY_MAP_BASE {
+        return -EPERM;
+    }
     let align_len = align_up(len);
     let adjust_fd = if fd as isize == -1 {
         inner.alloc_fd()
