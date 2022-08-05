@@ -1,4 +1,3 @@
-use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -18,7 +17,8 @@ use crate::task::{
     SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum, suspend_current_and_run_next, tid2task, TimeSpec, UContext,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
-use crate::trap::lazy_check;
+use alloc::slice;
+
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -51,7 +51,7 @@ pub fn sys_get_times(tms: *mut u64) -> isize {
     *translated_refmut(token, unsafe { tms.add(1) }) = usec;
     *translated_refmut(token, unsafe { tms.add(2) }) = usec;
     *translated_refmut(token, unsafe { tms.add(3) }) = usec;
-    
+
     usec as isize
 }
 
@@ -185,16 +185,44 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         //    0
         //}
         _ => {
+            // if let Some(app_inode) = open_file(
+            //     &work_path,
+            //     path.as_str(),
+            //     OpenFlags::RDONLY,
+            //     FileType::Regular,
+            // ) {
+            //     let all_data = app_inode.read_all();
+            //     process.exec(&all_data, args_vec);
+            
+            //     // return argc because cx.x[10] will be covered with it later
+            //     0
+            // } else {
+            //     -1
+            // }
             if let Some(app_inode) = open_file(
                 &work_path,
                 path.as_str(),
                 OpenFlags::RDONLY,
                 FileType::Regular,
             ) {
-                let all_data = app_inode.read_all();
-                process.exec(&all_data, args_vec);
-            
-                // return argc because cx.x[10] will be covered with it later
+                let len = app_inode.get_size();
+                // let mut inner = process.inner_exclusive_access();
+                let fd = process.inner_exclusive_access().alloc_fd();
+                process.inner_exclusive_access().fd_table[fd] = Some(FileDescriptor::Regular(app_inode));
+                // drop(inner);
+                let fd_table = process.inner_exclusive_access().fd_table.clone();
+                // println!("[debug] before kmmap:");
+                // crate::mm::get_rest();
+                let elf_buf = process.kmmap(0, len, fd, 0, 0, &fd_table);
+                let argc = args_vec.len();
+                unsafe {
+                    let elf_ref = slice::from_raw_parts(elf_buf as *const u8, len);
+                    process.exec(elf_ref, args_vec);
+                }
+                // println!("[debug] after kmmap:");
+                // crate::mm::get_rest();
+                process.kmunmap(elf_buf, len);
+                process.inner_exclusive_access().fd_table[fd] = None;
                 0
             } else {
                 -1
@@ -325,13 +353,13 @@ pub fn sys_brk(addr: usize) -> isize {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     if addr == 0 {
-        inner.heap_end.0 as isize
-    } else if addr < inner.heap_base.0 {
+        inner.memory_set.heap_end.0 as isize
+    } else if addr < inner.memory_set.heap_base.0 {
         -1
     } else {
-        let mut old_end = inner.heap_end.0;
+        let mut old_end = inner.memory_set.heap_end.0;
         let align_end = align_up(addr);
-        inner.heap_end = align_end.into();
+        inner.memory_set.heap_end = align_end.into();
     
         // remove lazy
         loop {
@@ -359,7 +387,7 @@ pub fn sys_mmap(
     let align_start = if start != 0 && flags & MAP_FIXED != 0 {
         align_up(start)
     } else {
-        align_up(inner.mmap_area_end.0)
+        align_up(inner.memory_set.mmap_area_end.0)
     };
     let align_len = align_up(len);
     let adjust_fd = if fd as isize == -1 {
