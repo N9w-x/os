@@ -10,6 +10,7 @@ use utils::*;
 
 use crate::console::{ERROR, INFO};
 use crate::const_def;
+use crate::sbi::shutdown;
 use crate::task::TimeSpec;
 
 const SYSCALL_LINK_AT: usize = 37;
@@ -212,7 +213,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_IOCTL => 0,
         SYSCALL_PREAD64 => sys_pread64(args[0], args[1] as *mut u8, args[2], args[3]),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
-        501 => panic!("shut down"),
+        501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
             // let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);

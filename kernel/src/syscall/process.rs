@@ -1,7 +1,9 @@
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::arch::asm;
 use core::mem::size_of;
+use core::slice::from_raw_parts;
 
 //use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 use crate::config::{
@@ -179,6 +181,29 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         .inner_exclusive_access()
         .work_path
         .to_string();
+
+    //* 如果先从内存中加载initproc, 需要解注: */
+    // if work_path == "/" && path == "user_shell" {
+    //     let process = current_process();
+    //     extern "C" {
+    //         fn app_1_start();
+    //         fn app_1_end();
+    //     }
+    //     process.exec(
+    //         unsafe {
+    //             from_raw_parts(
+    //                 app_1_start as *const u8,
+    //                 app_1_end as usize - app_1_start as usize,
+    //             )
+    //         },
+    //         args_vec
+    //     );
+    //     unsafe {
+    //         asm!("sfence.vma");
+    //         asm!("fence.i");
+    //     }
+    //     return 0;
+    // }
 
     let process = current_process();
     if let Some(app_inode) = open_file(

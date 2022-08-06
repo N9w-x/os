@@ -1,3 +1,5 @@
+use core::slice::from_raw_parts;
+
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -146,97 +148,61 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 }
 
 lazy_static! {
+    // 直接加载user_shell, 不再加载initproc
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("/", "initproc", OpenFlags::RDONLY, FileType::Regular).unwrap();
-        let v = inode.read_all();
-        ProcessControlBlock::new(v.as_slice())
+        //* 如果先从内存中加载initproc, 需要解注: */
+        //* sys_exec中还有一处需要解注 */
+        // extern "C" {
+        //     fn app_0_start();
+        //     fn app_0_end();
+        // }
+        // unsafe {
+        //     ProcessControlBlock::new(from_raw_parts(
+        //         app_0_start as *const u8,
+        //         app_0_end as usize - app_0_start as usize,
+        //     ))
+        // }
+        extern "C" {
+            fn app_1_start();
+            fn app_1_end();
+        }
+        unsafe {
+            ProcessControlBlock::new(from_raw_parts(
+                app_1_start as *const u8,
+                app_1_end as usize - app_1_start as usize,
+            ))
+        }
     };
 }
 
 pub fn add_initproc() {
-    add_initproc_into_fs();
     let _initproc = INITPROC.clone();
 }
 
-pub fn add_initproc_into_fs() {
-    extern "C" {
-        fn _num_app();
-    }
-    extern "C" {
-        fn _app_names();
-    }
-    let mut num_app_ptr = _num_app as usize as *mut usize;
-    // let start = _app_names as usize as *const u8;
-    let mut app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
-    
-    open_file("/", "mnt", OpenFlags::CREATE, FileType::Dir);
-    open_file("/", "tmp", OpenFlags::CREATE, FileType::Dir);
-    
-    // find if there already exits
-    // println!("Find if there already exits ");
-    //if let Some(inode) = open_file("/", "initproc", OpenFlags::RDONLY, FileType::Normal) {
-    //    println!("Already have init proc in FS");
-    //    //return;
-    //    inode.delete();
-    //}
-    //
-    //if let Some(inode) = open_file("/", "user_shell", OpenFlags::RDONLY, FileType::Normal) {
-    //    println!("Already have user shell in FS");
-    //    //return;
-    //    inode.delete();
-    //}
-    
-    // println!("Write apps(initproc & user_shell) to disk from mem ");
-    
-    //Write apps(initproc & user_shell) to disk from mem
-    match open_file("/", "initproc", OpenFlags::CREATE, FileType::Regular) {
-        None => panic!("initproc create fail!"),
-        Some(inode) => {
-            // println!("Create initproc ");
-            let mut data: Vec<&'static mut [u8]> = Vec::new();
-            data.push(unsafe {
-                core::slice::from_raw_parts_mut(
-                    app_start[0] as *mut u8,
-                    app_start[1] - app_start[0],
-                )
-            });
-            // println!("Start write initproc ");
-            inode.write(UserBuffer::new(data));
-            // println!("Init_proc OK");
-        }
-    }
-    
-    match open_file("/", "user_shell", OpenFlags::CREATE, FileType::Regular) {
-        None => panic!("user_shell create fail!"),
-        Some(inode) => {
-            // println!("Create user_shell ");
-            let mut data: Vec<&'static mut [u8]> = Vec::new();
-            data.push(unsafe {
-                core::slice::from_raw_parts_mut(
-                    app_start[1] as *mut u8,
-                    app_start[2] - app_start[1],
-                )
-            });
-            //data.extend_from_slice(  )
-            // println!("Start write user_shell ");
-            inode.write(UserBuffer::new(data));
-            // println!("User_shell OK");
-        }
-    }
-    // println!("Write apps(initproc & user_shell) to disk from mem");
-    
-    // release
-    let mut start_ppn = app_start[0] / PAGE_SIZE + 1;
-    println!(
-        "Recycle memory: {:x}-{:x}",
-        start_ppn * PAGE_SIZE,
-        (app_start[2] / PAGE_SIZE) * PAGE_SIZE
-    );
-    while start_ppn < app_start[2] / PAGE_SIZE {
-        add_free(start_ppn);
-        start_ppn += 1;
-    }
-}
+// 这里释放的内存在运行期间不会被用到，因此不如不释放
+// pub fn add_initproc_into_fs() {
+//     extern "C" {
+//         fn _num_app();
+//     }
+//     extern "C" {
+//         fn _app_names();
+//     }
+//     let mut num_app_ptr = _num_app as usize as *mut usize;
+//     // let start = _app_names as usize as *const u8;
+//     let mut app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
+
+//     // release
+//     let mut start_ppn = app_start[0] / PAGE_SIZE + 1;
+//     println!(
+//         "Recycle memory: {:x}-{:x}",
+//         start_ppn * PAGE_SIZE,
+//         (app_start[2] / PAGE_SIZE) * PAGE_SIZE
+//     );
+//     while start_ppn < app_start[2] / PAGE_SIZE {
+//         add_free(start_ppn);
+//         start_ppn += 1;
+//     }
+// }
 
 pub fn check_signals_of_current() -> Option<(i32, &'static str)> {
     // let process = current_process();
