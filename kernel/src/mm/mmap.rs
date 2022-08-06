@@ -70,10 +70,10 @@ impl MemoryMapArea {
         self.data_frames.insert(vpn, frame);
         let pte_flags = PTEFlags::from_bits(self.map_perm.bits() as u16).unwrap();
         page_table.map(vpn, ppn, pte_flags);
-        println!(
-            "mmap vpn: {:#X} -> ppn: {:#X}, {:#}",
-            vpn.0, ppn.0, self.map_perm
-        );
+        // println!(
+        //     "mmap vpn: {:#X} -> ppn: {:#X}, {:#}",
+        //     vpn.0, ppn.0, self.map_perm
+        // );
 
         // 复制文件数据到内存
         if let Some(file_descriptor) = &fd_table[self.fd] {

@@ -81,7 +81,7 @@ const_def!(SYSCALL_WRITEV, 66);
 const SYSCALL_PREAD64: usize = 67;
 const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_NEW_FSTATAT: usize = 79;
-const SYSCALL_SIG_ACTION: usize = 134;
+
 const SYSCALL_SIG_PROC_MASK: usize = 135;
 const SYSCALL_FCNTL: usize = 25;
 
@@ -141,7 +141,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CONDVAR_SIGNAL => sys_condvar_signal(args[0]),
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_SIGACTION => sys_sigaction(args[0], args[1] as *mut usize, args[2] as *mut usize),
-        SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as *mut u64, args[2] as *mut u64),
+        SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0], args[1] as _, args[2] as _),
         //SYSCALL_SIGTIMEDWAIT => sys_sigtimedwait(args[0] as *mut u32, args[1] as *mut usize, args[2] as *mut usize),
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),

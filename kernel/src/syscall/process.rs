@@ -499,6 +499,7 @@ pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
 }
 
 pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isize {
+    // println!("[sigaction] signum: {}, act: {:#X}, oldact: {:#X}", signum, act as usize, oldact as usize);
     if let Some(s) = Signum::from_bits(1 << signum) {
         if [Signum::SIGKILL, Signum::SIGSTOP].contains(&s) {
             return -1;
@@ -529,7 +530,7 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     // 保存新的sigaction
     if act as usize != 0 {
         let sigaction = *translated_ref(token, act);
-        drop(task_inner);
+        // drop(task_inner);
         // println!("[sigaction] tid: {} sigaction: {:#X}, signum: {}", task.gettid(), sigaction.sa_handler, signum);
         process_inner.signal_actions.actions[signum] = Some(sigaction);
     }
@@ -587,7 +588,7 @@ pub fn sys_sigtimedwait(set: *mut u64, info: *mut usize, timeout: *mut usize) ->
         }
     }
 
-    let set = Signum::from_bits(*translated_refmut(token, set) as u64).unwrap();
+    let set = Signum::from_bits(*translated_refmut(token, set)).unwrap();
 
     for serial in 1..MAX_SIG {
         if set.contains(Signum::from_serial(serial).unwrap()) {
