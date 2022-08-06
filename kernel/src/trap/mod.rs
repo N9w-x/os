@@ -7,7 +7,7 @@ use riscv::register::{
 };
 
 pub use context::TrapContext;
-pub use pagefault::lazy_check;
+pub use pagefault::{lazy_check, cow_check};
 
 use crate::config::TRAMPOLINE;
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
@@ -116,7 +116,13 @@ pub fn trap_handler() -> ! {
             //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
             //}
             // println!("{:#?}", current_trap_cx());
-            if !lazy_check(stval) {
+            if !([
+                Trap::Exception(Exception::StoreFault), 
+                Trap::Exception(Exception::StorePageFault)
+            ].contains(&scause.cause()) 
+                && cow_check(stval) 
+                || lazy_check(stval))
+            {
                 println!(
                     "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
                     scause.cause(),

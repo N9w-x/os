@@ -7,7 +7,7 @@ use bitflags::*;
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 
 bitflags! {
-    pub struct PTEFlags: u8 {
+    pub struct PTEFlags: u16 {
         const V = 1 << 0;
         const R = 1 << 1;
         const W = 1 << 2;
@@ -16,6 +16,7 @@ bitflags! {
         const G = 1 << 5;
         const A = 1 << 6;
         const D = 1 << 7;
+        const COW = 1 << 8;
     }
 }
 
@@ -38,7 +39,7 @@ impl PageTableEntry {
         (self.bits >> 10 & ((1usize << 44) - 1)).into()
     }
     pub fn flags(&self) -> PTEFlags {
-        PTEFlags::from_bits(self.bits as u8).unwrap()
+        PTEFlags::from_bits(self.bits as u16 & 0x3ff).unwrap()
     }
     pub fn is_valid(&self) -> bool {
         (self.flags() & PTEFlags::V) != PTEFlags::empty()
@@ -52,10 +53,15 @@ impl PageTableEntry {
     pub fn executable(&self) -> bool {
         (self.flags() & PTEFlags::X) != PTEFlags::empty()
     }
-    
-    pub fn set_flags(&mut self, flags: usize) {
-        self.bits = (self.bits & !0b1110usize) | (flags & 0b1110usize);
+    pub fn is_cow(&self) -> bool {
+        (self.flags() & PTEFlags::COW) != PTEFlags::empty()
     }
+    pub fn set_flags(&mut self, flags: PTEFlags) {
+        self.bits = (self.bits & !0xFF) | (flags.bits() as usize)
+    }    
+    // pub fn set_flags(&mut self, flags: usize) {
+    //     self.bits = (self.bits & !0b1110usize) | (flags & 0b1110usize);
+    // }
 }
 
 pub struct PageTable {
@@ -119,22 +125,22 @@ impl PageTable {
         result
     }
     
-    pub fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        let idxs = vpn.indexes();
-        let mut ppn = self.root_ppn;
-        for i in 0..3 {
-            let pte = &mut ppn.get_pte_array()[idxs[i]];
-            if i == 2 {
-                pte.set_flags(flags);
-                break;
-            }
-            if !pte.is_valid() {
-                return -1;
-            }
-            ppn = pte.ppn();
-        }
-        0
-    }
+    // pub fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     let idxs = vpn.indexes();
+    //     let mut ppn = self.root_ppn;
+    //     for i in 0..3 {
+    //         let pte = &mut ppn.get_pte_array()[idxs[i]];
+    //         if i == 2 {
+    //             pte.set_flags(flags);
+    //             break;
+    //         }
+    //         if !pte.is_valid() {
+    //             return -1;
+    //         }
+    //         ppn = pte.ppn();
+    //     }
+    //     0
+    // }
     
     #[allow(unused)]
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
@@ -153,6 +159,10 @@ impl PageTable {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.find_pte(vpn).map(|pte| *pte)
     }
+
+    pub fn translate_mut_ref(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
+        self.find_pte(vpn)
+    }
     
     pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
         self.find_pte(va.clone().floor()).map(|pte| {
@@ -166,18 +176,19 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
-    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
-    //     if let Some(pte) = self.find_pte(vpn) {
-    //         if !pte.is_valid() {
-    //             return false;
-    //         }
-    //         pte.bits = pte.ppn().0 << 10
-    //             | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
-    //             true
-    //     } else {
-    //         false
-    //     }
-    // }
+
+    pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+        if let Some(pte) = self.find_pte(vpn) {
+            if !pte.is_valid() {
+                return false;
+            }
+            pte.bits = pte.ppn().0 << 10
+                | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
+                true
+        } else {
+            false
+        }
+    }
 }
 
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {

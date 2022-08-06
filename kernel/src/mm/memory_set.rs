@@ -20,6 +20,7 @@ use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::aux::AuxHeader;
 use crate::mm::mmap::MemoryMapArea;
 
+use super::frame_allocator::{frame_add_ref, frame_get_ref};
 use super::{frame_alloc, page_table, translated_byte_buffer, FrameTracker, UserBuffer};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
@@ -56,42 +57,42 @@ pub struct MemorySet {
 }
 
 impl MemorySet {
-    pub fn set_mem_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        const PROT_NONE: usize = 0;
-        const PROT_READ: usize = 1;
-        const PROT_WRITE: usize = 2;
-        const PROT_EXEC: usize = 4;
+    // pub fn set_mem_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     const PROT_NONE: usize = 0;
+    //     const PROT_READ: usize = 1;
+    //     const PROT_WRITE: usize = 2;
+    //     const PROT_EXEC: usize = 4;
         
-        let pte_res = self.set_pte_flags(vpn, flags);
-        let mut map_area_res = -1;
-        for area in &mut self.areas {
-            if area.vpn_range.contain(vpn) {
-                let mut map_perm = MapPermission::U;
-                if (flags & PROT_READ) != 0 {
-                    map_perm |= MapPermission::R
-                }
-                if flags & PROT_WRITE != 0 {
-                    map_perm |= MapPermission::W
-                }
-                if flags & PROT_EXEC != 0 {
-                    map_perm |= MapPermission::X
-                }
+    //     let pte_res = self.set_pte_flags(vpn, flags);
+    //     let mut map_area_res = -1;
+    //     for area in &mut self.areas {
+    //         if area.vpn_range.contain(vpn) {
+    //             let mut map_perm = MapPermission::U;
+    //             if (flags & PROT_READ) != 0 {
+    //                 map_perm |= MapPermission::R
+    //             }
+    //             if flags & PROT_WRITE != 0 {
+    //                 map_perm |= MapPermission::W
+    //             }
+    //             if flags & PROT_EXEC != 0 {
+    //                 map_perm |= MapPermission::X
+    //             }
                 
-                area.map_perm = map_perm;
-                break;
-            }
-        }
+    //             area.map_perm = map_perm;
+    //             break;
+    //         }
+    //     }
         
-        if map_area_res == -1 || pte_res == -1 {
-            -1
-        } else {
-            0
-        }
-    }
+    //     if map_area_res == -1 || pte_res == -1 {
+    //         -1
+    //     } else {
+    //         0
+    //     }
+    // }
     
-    fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
-        self.page_table.set_pte_flags(vpn, flags)
-    }
+    // fn set_pte_flags(&mut self, vpn: VirtPageNum, flags: usize) -> isize {
+    //     self.page_table.set_pte_flags(vpn, flags)
+    // }
     
     pub fn new_bare() -> Self {
         Self {
@@ -465,6 +466,91 @@ impl MemorySet {
         memory_set
     }
 
+    pub fn from_existed_user_cow(user_space: &mut MemorySet) -> MemorySet {
+        let mut memory_set = Self::new_bare();
+        // trampoline, trap context, user stack 不能 CoW
+        // map trampoline
+        memory_set.map_trampoline();
+        for area in user_space.areas.iter() {
+            // code segment, data segment 之后 CoW
+            if VirtAddr::from(area.vpn_range.get_start()) < user_space.heap_base {
+                continue;
+            }
+            // trap context, user stack
+            let new_area = MapArea::from_another(area);
+            memory_set.push(new_area, None);
+            // copy data from another space
+            for vpn in area.vpn_range {
+                let src_ppn = user_space.translate(vpn).unwrap().ppn();
+                let dst_ppn = memory_set.translate(vpn).unwrap().ppn();
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
+            }
+        }
+
+        // CoW: code segment, data segment, user heap, mmap
+        let page_table = &mut user_space.page_table;
+        for area in user_space.areas.iter() {
+            // code segment, data segment
+            if VirtAddr::from(area.vpn_range.get_start()) < user_space.heap_base {
+                let mut new_area = MapArea::from_another(area);
+                for vpn in area.vpn_range {
+                    let pte = page_table.translate_mut_ref(vpn).unwrap();
+                    let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
+                    let ppn = pte.ppn();
+                    frame_add_ref(ppn);
+                    pte.set_flags(flags);
+                    memory_set.page_table.map(vpn, ppn, flags);
+                    new_area.insert_cow(vpn, ppn);
+                }
+                memory_set.areas.push(new_area);
+            }
+        }
+        // heap
+        for (vpn, frame_tracker) in user_space.heap.iter() {
+            memory_set.heap.insert(vpn.clone(), FrameTracker { ppn: frame_tracker.ppn });
+        }
+        memory_set.heap_base = user_space.heap_base;
+        memory_set.heap_end = user_space.heap_end;
+        // mmap
+        for mmap_area in user_space.mmap_areas.iter() {
+            memory_set.mmap_areas.push(MemoryMapArea::from_another(mmap_area));
+        }
+        memory_set.mmap_area_base = user_space.mmap_area_base;
+        memory_set.mmap_area_end = user_space.mmap_area_end;
+
+        memory_set
+    }
+
+    pub fn cow_alloc(&mut self, vpn: VirtPageNum) {
+        if let Some(pte) = self.page_table.translate_mut_ref(vpn) {
+            let old_ppn = pte.ppn();
+            let flags = pte.flags() & !PTEFlags::COW | PTEFlags::W;
+            if frame_get_ref(old_ppn) == 1 {
+                // Store Fault 处剩余引用计数 = 1，则将该页重新变为可写
+                pte.set_flags(flags);
+            } else {
+                // 否则重新分配内存
+                let frame = frame_alloc().unwrap();
+                let new_ppn = frame.ppn;
+                // 修改页表，建立映射
+                *pte = PageTableEntry::new(new_ppn, flags);
+                // 复制数据
+                new_ppn.get_bytes_array().copy_from_slice(&old_ppn.get_bytes_array());
+                for area in self.areas.iter_mut() {
+                    if area.vpn_range.contain(vpn) {
+                        // old_ppn 此时被remove和dealloc
+                        area.data_frames.insert(vpn, frame);
+                        break;
+                    }
+                }
+            }
+        } else {
+            panic!("Page table entry doesn't exit.")
+        }
+    }
+
     pub fn activate(&self) {
         let satp = self.page_table.token();
         unsafe {
@@ -585,9 +671,9 @@ impl MemorySet {
         }
     }
     
-    // pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
-    //     self.page_table.set_pte_flags(vpn, flags)
-    // }
+    pub fn set_pte_flags(&self, vpn: VirtPageNum, flags: PTEFlags) -> bool {
+        self.page_table.set_pte_flags(vpn, flags)
+    }
 }
 
 pub struct MapArea {
@@ -621,6 +707,10 @@ impl MapArea {
             map_perm: another.map_perm,
         }
     }
+    // 记录映射关系，但不分配内存
+    pub fn insert_cow(&mut self, vpn: VirtPageNum, ppn: PhysPageNum) {
+        self.data_frames.insert(vpn, FrameTracker { ppn });
+    }
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
         match self.map_type {
@@ -633,7 +723,7 @@ impl MapArea {
                 self.data_frames.insert(vpn, frame);
             }
         }
-        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits as u16).unwrap();
         page_table.map(vpn, ppn, pte_flags);
     }
     pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {

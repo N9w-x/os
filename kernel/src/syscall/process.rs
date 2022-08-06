@@ -431,30 +431,30 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     }
 }
 
-// pub fn sys_mprotect(addr: usize, len: usize, prot: usize) -> isize {
-//     if addr == 0 || addr % PAGE_SIZE != 0 {// addr对齐到页面
-//         -1
-//     } else {
-//         // current_process()
-//         //     .inner_exclusive_access()
-//         //     .mprotect(addr, align_up(len), prot);
-//         let process = current_process();
-//         let mut inner = process.inner_exclusive_access();
-//         let flag = PTEFlags::from_bits((prot as u8) << 1).unwrap();
-//         let mut curr_addr = addr;
-//         loop {
-//             if curr_addr >= addr + len {
-//                 break;
-//             }
-//             let vpn = VirtPageNum::from(VirtAddr::from(curr_addr));
-//             if !inner.memory_set.set_pte_flags(vpn, flag) {
-//                 return -1;
-//             }
-//             curr_addr += PAGE_SIZE;
-//         }
-//         0
-//     }
-// }
+pub fn sys_mprotect(addr: usize, len: usize, prot: usize) -> isize {
+    if addr == 0 || addr % PAGE_SIZE != 0 {// addr对齐到页面
+        -1
+    } else {
+        // current_process()
+        //     .inner_exclusive_access()
+        //     .mprotect(addr, align_up(len), prot);
+        let process = current_process();
+        let mut inner = process.inner_exclusive_access();
+        let flag = PTEFlags::from_bits((prot as u16 & 0xff) << 1).unwrap();
+        let mut curr_addr = addr;
+        loop {
+            if curr_addr >= addr + len {
+                break;
+            }
+            let vpn = VirtPageNum::from(VirtAddr::from(curr_addr));
+            if !inner.memory_set.set_pte_flags(vpn, flag) {
+                return -1;
+            }
+            curr_addr += PAGE_SIZE;
+        }
+        0
+    }
+}
 
 //that's only root user
 pub fn sys_get_uid() -> isize {
@@ -674,22 +674,22 @@ pub fn sys_clock_gettime(clk_id: isize, tp: *mut usize) -> isize {
     }
 }
 
-pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
-    if addr % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
-        return -1;
-    }
-    let pcb = current_process();
-    let memory_set = &mut pcb.inner_exclusive_access().memory_set;
+// pub fn sys_mprotect(addr: usize, len: usize, prot: isize) -> isize {
+//     if addr % PAGE_SIZE != 0 || len % PAGE_SIZE != 0 {
+//         return -1;
+//     }
+//     let pcb = current_process();
+//     let memory_set = &mut pcb.inner_exclusive_access().memory_set;
 
-    let start_vpn = addr / PAGE_SIZE;
-    for i in 0..(len / PAGE_SIZE) {
-        let vpn = start_vpn + i;
-        if memory_set.set_mem_flags(VirtPageNum::from(vpn), prot as usize) == -1 {
-            return -1;
-        }
-    }
-    0
-}
+//     let start_vpn = addr / PAGE_SIZE;
+//     for i in 0..(len / PAGE_SIZE) {
+//         let vpn = start_vpn + i;
+//         if memory_set.set_mem_flags(VirtPageNum::from(vpn), prot as usize) == -1 {
+//             return -1;
+//         }
+//     }
+//     0
+// }
 
 #[derive(Clone, Copy, Debug)]
 pub struct RLimit64 {

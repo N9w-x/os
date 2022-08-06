@@ -68,7 +68,7 @@ impl MemoryMapArea {
         let frame = frame_alloc().unwrap();
         let ppn = frame.ppn;
         self.data_frames.insert(vpn, frame);
-        let pte_flags = PTEFlags::from_bits(self.map_perm.bits()).unwrap();
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits() as u16).unwrap();
         page_table.map(vpn, ppn, pte_flags);
         println!(
             "mmap vpn: {:#X} -> ppn: {:#X}, {:#}",
@@ -115,7 +115,7 @@ impl MemoryMapArea {
         for vpn in self.vpn_range {
             let frame = frame_alloc().unwrap();
             let ppn = frame.ppn;
-            let pte_flags = PTEFlags::from_bits(self.map_perm.bits()).unwrap();
+            let pte_flags = PTEFlags::from_bits(self.map_perm.bits() as u16).unwrap();
             self.data_frames.insert(vpn, frame);
             page_table.map(vpn, ppn, pte_flags);
             // println!("[debug] vpn: 0x{:X} -> ppn: 0x{:X}", vpn.0, ppn.0);

@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{vec::Vec, collections::BTreeMap};
 use core::fmt::{self, Debug, Formatter};
 
 use lazy_static::*;
@@ -45,6 +45,7 @@ pub struct StackFrameAllocator {
     current: usize,
     end: usize,
     recycled: Vec<usize>,
+    ref_count: BTreeMap<usize, u8>,
 }
 
 impl StackFrameAllocator {
@@ -61,26 +62,43 @@ impl FrameAllocator for StackFrameAllocator {
             current: 0,
             end: 0,
             recycled: Vec::new(),
+            ref_count: BTreeMap::new(),
         }
     }
     fn alloc(&mut self) -> Option<PhysPageNum> {
         if let Some(ppn) = self.recycled.pop() {
+            self.ref_count.insert(ppn, 1);
             Some(ppn.into())
         } else if self.current == self.end {
             None
         } else {
             self.current += 1;
+            self.ref_count.insert(self.current - 1, 1);
             Some((self.current - 1).into())
         }
     }
     fn dealloc(&mut self, ppn: PhysPageNum) {
         let ppn = ppn.0;
-        // validity check
-        if ppn >= self.current || self.recycled.iter().any(|&v| v == ppn) {
-            panic!("Frame ppn={:#x} has not been allocated!", ppn);
+        let ref_times = self.ref_count.get_mut(&ppn).unwrap();
+        *ref_times -= 1;
+        if *ref_times == 0 {
+            self.ref_count.remove(&ppn);
+            // validity check
+            if ppn >= self.current || self.recycled.iter().any(|&v| v == ppn) {
+                panic!("Frame ppn={:#x} has not been allocated!", ppn);
+            }
+            // recycle
+            self.recycled.push(ppn);
         }
-        // recycle
-        self.recycled.push(ppn);
+    }
+}
+
+impl StackFrameAllocator {
+    fn add_ref(&mut self, ppn: PhysPageNum) {
+        *self.ref_count.get_mut(&ppn.0).unwrap() += 1;
+    }
+    fn get_ref(&self, ppn: PhysPageNum) -> usize {
+        *self.ref_count.get(&ppn.0).unwrap() as usize
     }
 }
 
@@ -106,6 +124,14 @@ pub fn frame_alloc() -> Option<FrameTracker> {
         .lock()
         .alloc()
         .map(FrameTracker::new)
+}
+
+pub fn frame_add_ref(ppn: PhysPageNum) {
+    FRAME_ALLOCATOR.lock().add_ref(ppn)
+}
+
+pub fn frame_get_ref(ppn: PhysPageNum) -> usize {
+    FRAME_ALLOCATOR.lock().get_ref(ppn)
 }
 
 pub fn frame_dealloc(ppn: PhysPageNum) {
