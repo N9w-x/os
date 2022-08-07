@@ -531,7 +531,23 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     if act as usize != 0 {
         let sigaction = *translated_ref(token, act);
         // drop(task_inner);
-        // println!("[sigaction] tid: {} sigaction: {:#X}, signum: {}", task.gettid(), sigaction.sa_handler, signum);
+        // println!("[sigaction] tid: {}, signum: {}, sigaction: {:#X}, flags: {:#X}, mask: {:#X}, restorer: {:#X}",
+        //     task.gettid(),
+        //     signum,
+        //     sigaction.sa_handler,
+        //     sigaction.sa_flags,
+        //     sigaction.sa_mask,
+        //     sigaction.sa_restorer,
+        // );
+        // println!("[sigaction] {:#X} {:#X} {:#X} {:#X} {:#X} {:#X} {:#X}",
+        //     translated_ref(token, act as *const usize),
+        //     translated_ref(token, unsafe {(act as *const usize).add(1)}),
+        //     translated_ref(token, unsafe {(act as *const usize).add(2)}),
+        //     translated_ref(token, unsafe {(act as *const usize).add(3)}),
+        //     translated_ref(token, unsafe {(act as *const usize).add(4)}),
+        //     translated_ref(token, unsafe {(act as *const usize).add(5)}),
+        //     translated_ref(token, unsafe {(act as *const usize).add(6)}),
+        // );
         process_inner.signal_actions.actions[signum] = Some(sigaction);
     }
 

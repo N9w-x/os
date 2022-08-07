@@ -63,7 +63,7 @@ bitflags! {
 
 bitflags! {
     /* Bits in `sa_flags'.  */
-    pub struct SaFlags: u32 {
+    pub struct SaFlags: usize {
         const SA_NOCLDSTOP = 1;     /* Don't send SIGCHLD when children stop.  */
         const SA_NOCLDWAIT = 2;     /* Don't create zombie on child death.  */
         const SA_SIGINFO   = 4;     /* Invoke signal-catching function with three arguments instead of one.  */
@@ -171,11 +171,11 @@ pub struct SigAction {
     /// 信号处理函数
     pub sa_handler: usize,
     // pub sa_sigaction: usize,
-    /// 信号处理函数执行期间需要屏蔽的信号
-    pub sa_mask: Signum,
     /// 指定信号处理的行为
     pub sa_flags: SaFlags,
     pub sa_restorer: usize,
+    /// 信号处理函数执行期间需要屏蔽的信号
+    pub sa_mask: Signum,
 }
 
 #[repr(C)]
