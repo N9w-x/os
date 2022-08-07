@@ -4,11 +4,12 @@ pub use crate::board::{CLOCK_FREQ, MMIO};
 pub const USER_STACK_SIZE: usize = 4096 * 6;
 //0x2000
 pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
-pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x200;
+//pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x200;
+pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x1000;
 pub const KERNEL_MEMORY_MAP_BASE: usize = 0x9000_0000;
 //
-// pub const MEMORY_END: usize = 0x8000_0000 + 0x10_0000 * 128;
-pub const MEMORY_END: usize = 0x8080_0000;
+pub const MEMORY_END: usize = 0x8000_0000 + 0x10_0000 * 128;
+//pub const MEMORY_END: usize = 0x8080_0000;
 pub const PAGE_SIZE: usize = 0x1000;
 pub const PAGE_SIZE_BITS: usize = 0xc;
 

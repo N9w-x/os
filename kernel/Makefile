@@ -86,7 +86,7 @@ fs-img: $(APPS)
 
 img-lite:
 	@rm -rf fat32.img
-	@mkfs.vfat -n "test" -F 32 -C fat32.img 40960
+	@mkfs.vfat -n "test" -F 32 -C fat32.img 81920
 	@mkdir mnt -p
 	@sudo mount -o loop -t vfat fat32.img mnt
 	@#sudo cp -r  ../final-file/* ./mnt
