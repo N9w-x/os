@@ -11,12 +11,12 @@ use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use crate::console::INFO;
 use crate::fs::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
-    open_file, OpenFlags, OSInode, VFSFlag, WorkPath,
+    open_file, OpenFlags, OSInode, VFSFlag, WorkPath, PollFD, POLLIN,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
-use crate::task::{current_process, current_task, current_user_token, TimeSpec, UTIME_NOW, UTIME_OMIT};
+use crate::task::{current_process, current_task, current_user_token, TimeSpec, UTIME_NOW, UTIME_OMIT, Signum};
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
 use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE};
@@ -713,4 +713,30 @@ impl Statfs {
         let size = core::mem::size_of::<Self>();
         unsafe { core::slice::from_raw_parts(self as *const _ as usize as *mut u8, size) }
     }
+}
+
+/// unsupport timeout/sigmask
+pub fn sys_ppoll(fds: *mut PollFD, nfds: usize, timeout: *const TimeSpec, sigmask: *const Signum) -> isize {
+    let token = current_user_token();
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let mut ret = 0;
+
+    for i in 0..nfds {
+        let mut poll_fd = translated_refmut(token, unsafe { fds.add(i) });
+
+        if let Some(fd) = &inner.fd_table[poll_fd.fd as usize] {
+            // ! 这里只处理了STDIN
+            if poll_fd.fd == 0 && poll_fd.events & POLLIN != 0 {
+                poll_fd.revents = POLLIN;
+                ret += 1;
+            } else {
+                todo!();
+            }
+        } else {
+            poll_fd.revents = 0;
+        }
+    }
+
+    ret
 }

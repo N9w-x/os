@@ -768,3 +768,15 @@ pub fn sys_prlimit(
         }
     }
 }
+
+pub fn sys_setpgid(pid: usize, pgid: usize) -> isize {
+    0
+}
+
+pub fn sys_getpgid(pid: usize) -> isize {
+    0
+}
+
+pub fn sys_geteuid() -> isize {
+    0
+}

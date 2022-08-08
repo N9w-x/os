@@ -184,3 +184,19 @@ impl Kstat {
         unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, size) }
     }
 }
+
+#[repr(C)]
+pub struct PollFD {
+    pub fd: i32,
+    pub events: i16,
+    pub revents: i16,
+}
+
+pub const POLLIN: i16 = 0x001;      /* There is data to read */
+pub const POLLPRI: i16 = 0x002;     /* There is urgent data to read */
+pub const POLLOUT: i16 = 0x004;     /* Writing now will not block */
+pub const POLLERR: i16 = 0x008;     /* Error condition (output only) */
+pub const POLLHUP: i16 = 0x010;     /* Hang up (output only) */
+pub const POLLNVAL: i16 = 0x020;    /* Invalid request: fd not open (output only) */
+pub const POLLRDNORM: i16 = 0x040;  /* Equivalent to POLLIN */
+pub const POLLRDBAND: i16 = 0x080;  /* Priority band data can be read (generally unused on Linux) */

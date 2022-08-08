@@ -81,9 +81,11 @@ const_def!(SYSCALL_WRITEV, 66);
 const SYSCALL_PREAD64: usize = 67;
 const SYSCALL_LSEEK: usize = 62;
 const SYSCALL_NEW_FSTATAT: usize = 79;
-
-const SYSCALL_SIG_PROC_MASK: usize = 135;
 const SYSCALL_FCNTL: usize = 25;
+const SYSCALL_PPOLL: usize = 73;
+const SYSCALL_SETPGID: usize = 154;
+const SYSCALL_GETPGID: usize = 155;
+const SYSCALL_GETEUID: usize = 175;
 
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
@@ -104,7 +106,7 @@ mod errno;
 mod net;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    // if ![SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id) {
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     // }
     
@@ -212,12 +214,16 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_STATFS => sys_statfs(args[0] as _, args[1] as _),
         SYSCALL_IOCTL => 0,
         SYSCALL_PREAD64 => sys_pread64(args[0], args[1] as *mut u8, args[2], args[3]),
+        SYSCALL_SETPGID => sys_setpgid(args[0], args[1]),
+        SYSCALL_GETPGID => sys_getpgid(args[0]),
+        SYSCALL_GETEUID => sys_geteuid(),
+        SYSCALL_PPOLL => sys_ppoll(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
-            // let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
-            // println!("{}", log);
+            let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
+            println!("{}", log);
             0
         } //_ => 0,
     }
