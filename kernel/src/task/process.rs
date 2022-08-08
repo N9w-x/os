@@ -7,20 +7,20 @@ use spin::Mutex;
 
 use crate::config::{AT_EXECFN, AT_NULL, AT_RANDOM, FD_MAX, MAP_FIXED, MEMORY_MAP_BASE, PAGE_SIZE};
 use crate::fs::{
-    open_file, File, FileDescriptor, FileType, OSInode, OpenFlags, Stdin, Stdout, WorkPath,
+    File, FileDescriptor, FileType, open_file, OpenFlags, OSInode, Stdin, Stdout, WorkPath,
 };
 use crate::mm::{
-    align_up, translated_byte_buffer, translated_ref, translated_refmut, AuxHeader, MapPermission,
-    MemoryMapArea, MemorySet, UserBuffer, VPNRange, VirtAddr, VirtPageNum, KERNEL_SPACE,
+    align_up, AuxHeader, KERNEL_SPACE, MapPermission, MemoryMapArea, MemorySet,
+    translated_byte_buffer, translated_ref, translated_refmut, UserBuffer, VirtAddr, VirtPageNum, VPNRange,
 };
 use crate::task::SignalStruct;
 use crate::trap::{trap_handler, TrapContext};
 
+use super::{add_task, current_user_token, ITimerVal, Signum};
+use super::{pid_alloc, PidHandle};
 use super::id::RecycleAllocator;
 use super::manager::{insert_into_pid2process, insert_into_tid2task};
 use super::TaskControlBlock;
-use super::{add_task, current_user_token, ITimerVal, Signum};
-use super::{pid_alloc, PidHandle};
 
 const AT_FD_CWD: isize = -100;
 
@@ -153,8 +153,7 @@ impl ProcessControlBlockInner {
                 if start_vpn <= old_start && end_vpn > old_start && end_vpn < old_end {
                     let u_old_start: usize = old_start.into();
                     // 向上取整页
-                    old_offset = old_offset
-                        + ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
+                    old_offset += ((len + start - u_old_start + PAGE_SIZE - 1) / PAGE_SIZE) * PAGE_SIZE;
                     old_start = VirtAddr::from(start + len).ceil();
                     self.memory_set.insert_mmap_area(MemoryMapArea::new(
                         old_start.into(),

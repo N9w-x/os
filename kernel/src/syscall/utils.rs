@@ -1,3 +1,6 @@
+use core::mem::size_of;
+use core::slice::from_raw_parts;
+
 use crate::mm::{translated_byte_buffer, UserBuffer};
 use crate::task::current_user_token;
 
@@ -9,7 +12,7 @@ pub fn sys_uname(buf: *mut u8) -> isize {
         core::mem::size_of::<utsname>(),
     ));
     let write_size = user_buf.write(utsname::new().as_bytes());
-    
+
     match write_size {
         0 => -1,
         _ => 0,
@@ -51,4 +54,37 @@ impl utsname {
         let size = core::mem::size_of::<Self>();
         unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, size) }
     }
+}
+
+#[repr(packed)]
+#[derive(Default)]
+pub struct SysInfo {
+    uptime: isize,
+    loads: [usize; 3],
+    total_ram: usize,
+    free_ram: usize,
+    shared_ram: usize,
+    buffer_ram: usize,
+    total_swap: usize,
+    free_swap: usize,
+    procs: u16,
+    total_high: usize,
+    free_high: usize,
+    mem_unit: u32,
+    _f: [u8; 20 - 2 * size_of::<usize>() - size_of::<u32>()],
+}
+
+impl SysInfo {
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { from_raw_parts(self as *const _ as *const u8, size_of::<SysInfo>()) }
+    }
+}
+
+pub fn sys_sysinfo(buf: *mut u8) -> isize {
+    let token = current_user_token();
+    let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, size_of::<SysInfo>()));
+    
+    user_buf.write(SysInfo::default().as_bytes());
+    
+    0
 }

@@ -90,6 +90,8 @@ const SYSCALL_GETEUID: usize = 175;
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_GET_UID: usize = 174;
+const SYSCALL_SYSINFO: usize = 179;
+const SYSCALL_SEND_FILE: usize = 71;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_GET_TID, 178);
@@ -97,19 +99,19 @@ const_def!(SYSCALL_GET_TID, 178);
 // not standard sys call
 const SYSCALL_HEAP_SPACE: usize = 550;
 
+mod errno;
 mod fs;
+mod net;
 mod process;
 mod sync;
 mod thread;
 mod utils;
-mod errno;
-mod net;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
     //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
     // }
-    
+
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -148,7 +150,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_SIGRETURN => sys_sigreturn(),
         SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
-        SYSCALL_GET_DENTS64 => sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize),
+        SYSCALL_GET_DENTS64 => {
+            sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize)
+        }
         SYSCALL_LINK_AT => 0,
         SYSCALL_UNLINK_AT => sys_unlink(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_MKDIR_AT => sys_mkdir(args[0] as isize, args[1] as *const u8, args[2] as u32),
@@ -187,11 +191,23 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
         SYSCALL_READV => sys_readv(args[0], args[1], args[2]),
-        SYSCALL_UTIMENSAT => sys_utimensat(args[0] as isize, args[1] as *const u8, args[2] as *const TimeSpec, args[3] as isize),
-        SYSCALL_PRLIMIT64 => sys_prlimit(args[0], args[1], args[2] as *const RLimit64, args[3] as *mut RLimit64),
+        SYSCALL_UTIMENSAT => sys_utimensat(
+            args[0] as isize,
+            args[1] as *const u8,
+            args[2] as *const TimeSpec,
+            args[3] as isize,
+        ),
+        SYSCALL_PRLIMIT64 => sys_prlimit(
+            args[0],
+            args[1],
+            args[2] as *const RLimit64,
+            args[3] as *mut RLimit64,
+        ),
         //SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as usize),
-        SYSCALL_SETITIMER => sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize),
+        SYSCALL_SETITIMER => {
+            sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize)
+        }
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_LSEEK => sys_lseek(args[0] as isize, args[1] as isize, args[2] as i32),
         SYSCALL_FCNTL => sys_fcntl(args[0], args[1] as u32, args[2] as _),
@@ -218,6 +234,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_GETPGID => sys_getpgid(args[0]),
         SYSCALL_GETEUID => sys_geteuid(),
         SYSCALL_PPOLL => sys_ppoll(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
+        SYSCALL_SYSINFO => sys_sysinfo(args[0] as _),
+        SYSCALL_SEND_FILE => sys_sendfile(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),

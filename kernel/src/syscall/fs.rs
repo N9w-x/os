@@ -1,4 +1,4 @@
-use alloc::format;
+use alloc::{format, vec};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -11,12 +11,14 @@ use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
 use crate::console::INFO;
 use crate::fs::{
     ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
-    open_file, OpenFlags, OSInode, VFSFlag, WorkPath, PollFD, POLLIN,
+    open_file, OpenFlags, OSInode, PollFD, POLLIN, VFSFlag, WorkPath,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
-use crate::task::{current_process, current_task, current_user_token, TimeSpec, UTIME_NOW, UTIME_OMIT, Signum};
+use crate::task::{
+    current_process, current_task, current_user_token, Signum, TimeSpec, UTIME_NOW, UTIME_OMIT,
+};
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
 use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE};
@@ -151,7 +153,7 @@ pub fn sys_get_cwd(buf: *mut u8, len: usize) -> isize {
     let token = current_user_token();
     //进程控制块
     let pcb = current_process();
-    
+
     let mut userbuf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let inner = pcb.inner_exclusive_access();
     let ret = userbuf.write(inner.work_path.to_string().as_bytes());
@@ -167,7 +169,7 @@ pub fn sys_chdir(path: *const u8) -> isize {
     let pcb = current_process();
     let mut inner = pcb.inner_exclusive_access();
     let path = translated_str(token, path);
-    
+
     //获取当前线程的work path
     let mut current_path = inner.work_path.to_string();
     drop(inner);
@@ -185,7 +187,7 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let path = translated_str(token, path);
-    
+
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::CREATE, FileType::Dir)
     } else if dir_fd == AT_FD_CWD {
@@ -197,7 +199,7 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-        
+
         if let Some(FileDescriptor::Regular(os_inode)) = inner.fd_table[fd_usize].clone() {
             if !os_inode.is_dir() {
                 return -1;
@@ -234,7 +236,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, len));
     let dirent_size = core::mem::size_of::<Dirent>();
     let mut total_read = 0;
-    
+
     //我为什么会喜欢这种写法(
     let dir_inode = if fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
@@ -255,7 +257,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             _ => return -1,
         }
     };
-    
+
     let read_times = len / DIRENT_SZ;
     let mut dirent = Dirent::default();
     for _ in 0..read_times {
@@ -502,7 +504,10 @@ pub fn sys_readv(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
             return -EPERM;
         }
         for i in 0..iov_cnt {
-            let iovec = translated_ref(token, (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec);
+            let iovec = translated_ref(
+                token,
+                (iov_ptr + i * core::mem::size_of::<IOVec>()) as *const IOVec,
+            );
             let buf = translated_byte_buffer(token, iovec.base, iovec.len);
             ret += f.read(UserBuffer::new(buf)) as isize;
         }
@@ -547,7 +552,12 @@ pub fn sys_utimensat(
         }
         return -ENOENT;
     }
-    if let Some(f) = open_file(base_path, path.as_str(), OpenFlags::empty(), FileType::Regular) {
+    if let Some(f) = open_file(
+        base_path,
+        path.as_str(),
+        OpenFlags::empty(),
+        FileType::Regular,
+    ) {
         do_utimensat(f, times, token);
         return 0;
     }
@@ -585,7 +595,8 @@ pub fn sys_pread64(fd: usize, buf: *mut u8, count: usize, offset: usize) -> isiz
                 let old_off = os_inode.get_offset();
                 os_inode.set_offset(offset);
                 let read_cnt = os_inode
-                    .read(UserBuffer::new(translated_byte_buffer(token, buf, count))) as isize;
+                    .read(UserBuffer::new(translated_byte_buffer(token, buf, count)))
+                    as isize;
                 os_inode.set_offset(old_off);
                 read_cnt
             }
@@ -688,7 +699,7 @@ pub struct Statfs {
     // Fragment size
     f_flags: i64,
     // Mount flags of filesystem
-    f_spare: [i64; 4],  // Padding bytes
+    f_spare: [i64; 4], // Padding bytes
 }
 
 impl Statfs {
@@ -716,15 +727,20 @@ impl Statfs {
 }
 
 /// unsupport timeout/sigmask
-pub fn sys_ppoll(fds: *mut PollFD, nfds: usize, timeout: *const TimeSpec, sigmask: *const Signum) -> isize {
+pub fn sys_ppoll(
+    fds: *mut PollFD,
+    nfds: usize,
+    timeout: *const TimeSpec,
+    sigmask: *const Signum,
+) -> isize {
     let token = current_user_token();
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let mut ret = 0;
-
+    
     for i in 0..nfds {
         let mut poll_fd = translated_refmut(token, unsafe { fds.add(i) });
-
+        
         if let Some(fd) = &inner.fd_table[poll_fd.fd as usize] {
             // ! 这里只处理了STDIN
             if poll_fd.fd == 0 && poll_fd.events & POLLIN != 0 {
@@ -737,6 +753,46 @@ pub fn sys_ppoll(fds: *mut PollFD, nfds: usize, timeout: *const TimeSpec, sigmas
             poll_fd.revents = 0;
         }
     }
-
+    
     ret
+}
+
+pub fn sys_sendfile(out_fd: isize, in_fd: isize, offset: *mut usize, len: usize) -> isize {
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
+    let token = inner.get_user_token();
+    
+    let file_out = match &inner.fd_table[out_fd as usize] {
+        Some(f) => f.clone(),
+        None => return -EPERM,
+    };
+    
+    let file_in = match &inner.fd_table[in_fd as usize] {
+        Some(f) => f.clone(),
+        None => return -EPERM,
+    };
+    
+    if !file_out.writable() || !file_in.readable() {
+        return -EPERM;
+    }
+    
+    if offset as usize != 0 {
+        match &file_in {
+            FileDescriptor::Regular(inode) => {
+                inode.set_offset(*translated_refmut(token, offset));
+            }
+            _ => return -EPERM,
+        }
+    }
+    
+    let mut buf = vec![0u8; len];
+    let buf_read = UserBuffer::new(vec![unsafe {
+        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), len)
+    }]);
+    let read_len = file_in.read(buf_read);
+    
+    let buf_write = UserBuffer::new(vec![unsafe {
+        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), len)
+    }]);
+    file_out.write(buf_write) as isize
 }

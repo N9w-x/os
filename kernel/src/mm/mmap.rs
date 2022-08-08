@@ -2,14 +2,14 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use core::fmt::{Display, Formatter};
 
+use crate::{config::PAGE_SIZE, fs::File};
 use crate::config::MAP_FIXED;
 use crate::fs::FileDescriptor;
 use crate::mm::address::VPNRange;
-use crate::{config::PAGE_SIZE, fs::File};
 
 use super::{
-    frame_alloc, page_table::PTEFlags, translated_byte_buffer, FrameTracker, MapPermission,
-    PageTable, PhysPageNum, UserBuffer, VirtAddr, VirtPageNum,
+    frame_alloc, FrameTracker, MapPermission, page_table::PTEFlags, PageTable,
+    PhysPageNum, translated_byte_buffer, UserBuffer, VirtAddr, VirtPageNum,
 };
 
 pub struct MemoryMapArea {
@@ -62,7 +62,7 @@ impl MemoryMapArea {
         &mut self,
         page_table: &mut PageTable,
         vpn: VirtPageNum,
-        fd_table: &Vec<Option<FileDescriptor>>,
+        fd_table: &[Option<FileDescriptor>],
     ) -> bool {
         // 分配物理页
         let frame = frame_alloc().unwrap();
@@ -92,7 +92,7 @@ impl MemoryMapArea {
                 FileDescriptor::Abstract(_) => todo!(),
             };
         }
-        return true;
+        true
     }
 
     /// 取消映射所有页
