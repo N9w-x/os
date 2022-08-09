@@ -101,7 +101,7 @@ impl ProcessControlBlockInner {
         len: usize,
         prot: usize,
         flags: usize,
-        fd: usize,
+        fd: isize,
         offset: usize,
     ) {
         let start_va = start.into();
@@ -117,9 +117,9 @@ impl ProcessControlBlockInner {
             let mut old_perm = MapPermission::U;
             let mut old_start = VirtAddr::from(0).floor();
             let mut old_end = VirtAddr::from(0).floor();
-            let mut old_flags = 0usize;
-            let mut old_fd = 0usize;
-            let mut old_offset = 0usize;
+            let mut old_flags = 0;
+            let mut old_fd = 0;
+            let mut old_offset = 0;
             loop {
                 let mut loop_flag = true;
                 for mmap_area in self.memory_set.mmap_areas.iter() {
@@ -159,9 +159,9 @@ impl ProcessControlBlockInner {
                         old_start.into(),
                         old_end.into(),
                         old_perm,
-                        old_flags,
                         old_fd,
                         old_offset,
+                        old_flags,
                     ));
                     // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                 } else
@@ -188,9 +188,9 @@ impl ProcessControlBlockInner {
                             part3_start.into(),
                             part3_end.into(),
                             part3_perm,
-                            part3_flags,
                             part3_fd,
                             part3_offset,
+                            part3_flags,
                         ));
                         // self.memory_set.alloc_mmap_area(part3_start.into(), &fd_table);
                     }
@@ -202,9 +202,9 @@ impl ProcessControlBlockInner {
                             old_start.into(),
                             old_end.into(),
                             old_perm,
-                            old_flags,
                             old_fd,
                             old_offset,
+                            old_flags,
                         ));
                         // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                     }
@@ -218,9 +218,9 @@ impl ProcessControlBlockInner {
                         old_start.into(),
                         old_end.into(),
                         old_perm,
-                        old_flags,
                         old_fd,
                         old_offset,
+                        old_flags,
                     ));
                     // self.memory_set.alloc_mmap_area(old_start.into(), &fd_table);
                 }
@@ -510,7 +510,7 @@ impl ProcessControlBlock {
                     // signals: Signum::empty(),
                     // signal_handling: 0,
                     // signal_masks: Signum::empty(),
-                    signal_actions: SignalStruct::default(),
+                    signal_actions: parent.signal_actions.clone(),
                     // killed: false,
                     // frozen: false,
                     // trap_ctx_backup: None,
@@ -525,7 +525,7 @@ impl ProcessControlBlock {
                     // heap_end: parent.heap_end,
                     // mmap_area_base: parent.mmap_area_base,
                     // mmap_area_end: parent.mmap_area_end,
-                    itimer: ITimerVal::new(),
+                    itimer: parent.itimer.clone(),
                 })
             },
         });
@@ -605,7 +605,7 @@ impl ProcessControlBlock {
         &self,
         start: usize,
         len: usize,
-        fd: usize,
+        fd: isize,
         offset: usize,
         flags: usize,
         fd_table: &Vec<Option<FileDescriptor>>,

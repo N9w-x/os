@@ -588,7 +588,7 @@ impl MemorySet {
         &mut self,
         start_va: VirtAddr,
         end_va: VirtAddr,
-        fd: usize,
+        fd: isize,
         offset: usize,
         flags: usize,
         fd_table: &Vec<Option<FileDescriptor>>,

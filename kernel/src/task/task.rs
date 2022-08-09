@@ -46,7 +46,7 @@ pub struct TaskControlBlockInner {
     /// 正在响应的信号
     pub signal_handling: usize,
     /// 要屏蔽的信号（全局屏蔽）
-    pub signal_masks: Signum,
+    pub signal_masks: u64,
     pub killed: bool,
     pub frozen: bool,
     /// 被打断的trap上下文
@@ -92,7 +92,7 @@ impl TaskControlBlock {
                     clear_child_tid: 0,
                     signals: Signum::empty(),
                     signal_handling: 0,
-                    signal_masks: Signum::empty(),
+                    signal_masks: 0,
                     killed: false,
                     frozen: false,
                     trap_ctx_backup: None,

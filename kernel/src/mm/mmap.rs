@@ -16,7 +16,7 @@ pub struct MemoryMapArea {
     pub vpn_range: VPNRange,
     pub data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     pub map_perm: MapPermission,
-    pub fd: usize,
+    pub fd: isize,
     pub offset: usize,
     pub flags: usize,
     pub length: usize,
@@ -27,7 +27,7 @@ impl MemoryMapArea {
         start_va: VirtAddr,
         end_va: VirtAddr,
         map_perm: MapPermission,
-        fd: usize,
+        fd: isize,
         offset: usize,
         flags: usize,
     ) -> Self {
@@ -75,8 +75,12 @@ impl MemoryMapArea {
         //     vpn.0, ppn.0, self.map_perm
         // );
 
+        if self.fd == -1 {
+            return true;
+        }
+
         // 复制文件数据到内存
-        if let Some(file_descriptor) = &fd_table[self.fd] {
+        if let Some(file_descriptor) = &fd_table[self.fd as usize] {
             match file_descriptor {
                 FileDescriptor::Regular(inode) => {
                     if inode.readable() {
@@ -121,7 +125,11 @@ impl MemoryMapArea {
             // println!("[debug] vpn: 0x{:X} -> ppn: 0x{:X}", vpn.0, ppn.0);
         }
 
-        if let Some(file_descriptor) = &fd_table[self.fd] {
+        if self.fd < 0 {
+            return true;
+        }
+
+        if let Some(file_descriptor) = &fd_table[self.fd as usize] {
             return match file_descriptor {
                 FileDescriptor::Regular(inode) => {
                     if inode.readable() {

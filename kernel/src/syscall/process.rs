@@ -21,7 +21,7 @@ use crate::task::{
     add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
     pid2process, suspend_current_and_run_next, tid2task, ClearChildTid, CloneFlag, ITimerVal,
     SigAction, SigInfo, Signum, TimeSpec, UContext, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK,
-    SIG_SETMASK, SIG_UNBLOCK,
+    SIG_SETMASK, SIG_UNBLOCK, SIG_DFL, current_trap_cx,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use alloc::slice;
@@ -221,7 +221,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let fd_table = process.inner_exclusive_access().fd_table.clone();
         // println!("[debug] before kmmap:");
         // crate::mm::get_rest();
-        let elf_buf = process.kmmap(0, len, fd, 0, 0, &fd_table);
+        let elf_buf = process.kmmap(0, len, fd as isize, 0, 0, &fd_table);
         let argc = args_vec.len();
         unsafe {
             let elf_ref = slice::from_raw_parts(elf_buf as *const u8, len);
@@ -414,7 +414,7 @@ pub fn sys_mmap(
     len: usize,
     prot: usize,
     flags: usize,
-    fd: usize,
+    fd: isize,
     offset: usize,
 ) -> isize {
     let token = current_user_token();
@@ -429,18 +429,11 @@ pub fn sys_mmap(
         return -EPERM;
     }
     let align_len = align_up(len);
-    let adjust_fd = if fd as isize == -1 {
-        inner.alloc_fd()
-    } else if flags & MAP_ANONYMOUS != 0 {
-        inner.alloc_specific_fd(fd)
-    } else {
-        fd
-    };
     // println!(
-    //     "[mmap] start: {:#X}, len: {:#X}, flag: {:#X}",
-    //     align_start, align_len, flags
+    //     "[mmap] start: {:#X}, len: {:#X}, flag: {:#X}, fd: {}, offset: {:#X}",
+    //     align_start, align_len, flags, fd, offset,
     // );
-    inner.mmap(align_start, align_len, prot, flags, adjust_fd, offset);
+    inner.mmap(align_start, align_len, prot, flags, fd, offset);
     align_start as isize
 }
 
@@ -499,7 +492,7 @@ pub fn sys_set_tid_address(tid_ptr: usize) -> isize {
 }
 
 pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isize {
-    // println!("[sigaction] signum: {}, act: {:#X}, oldact: {:#X}", signum, act as usize, oldact as usize);
+    // println!("[sigaction] signum: {}, act: {:#X}, oldact: {:#X}, pid: {}", signum, act as usize, oldact as usize, current_process().getpid());
     if let Some(s) = Signum::from_bits(1 << signum) {
         if [Signum::SIGKILL, Signum::SIGSTOP].contains(&s) {
             return -1;
@@ -521,34 +514,21 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     if let Some(old_sigaction) = process_inner.signal_actions.actions[signum] {
         if oldact as usize != 0 {
             *translated_refmut(token, oldact) = old_sigaction;
+            // println!("(sigaction old_handler:{:#X}, old_flag:{:#X}, old_mask:{:#X})", old_sigaction.sa_handler, old_sigaction.sa_flags.bits(), old_sigaction.sa_mask);
         }
         process_inner.signal_actions.actions[signum] = None;
     } else if oldact as usize != 0 {
-        *translated_refmut(token, oldact) = SigAction::default();
+        let sigact_old = translated_refmut(token, oldact);
+        sigact_old.sa_handler = SIG_DFL;
+        // sigact_old.sa_sigaction = 0;
+        sigact_old.sa_mask = 0;
     }
 
     // 保存新的sigaction
     if act as usize != 0 {
         let sigaction = *translated_ref(token, act);
-        // drop(task_inner);
-        // println!("[sigaction] tid: {}, signum: {}, sigaction: {:#X}, flags: {:#X}, mask: {:#X}, restorer: {:#X}",
-        //     task.gettid(),
-        //     signum,
-        //     sigaction.sa_handler,
-        //     sigaction.sa_flags,
-        //     sigaction.sa_mask,
-        //     sigaction.sa_restorer,
-        // );
-        // println!("[sigaction] {:#X} {:#X} {:#X} {:#X} {:#X} {:#X} {:#X}",
-        //     translated_ref(token, act as *const usize),
-        //     translated_ref(token, unsafe {(act as *const usize).add(1)}),
-        //     translated_ref(token, unsafe {(act as *const usize).add(2)}),
-        //     translated_ref(token, unsafe {(act as *const usize).add(3)}),
-        //     translated_ref(token, unsafe {(act as *const usize).add(4)}),
-        //     translated_ref(token, unsafe {(act as *const usize).add(5)}),
-        //     translated_ref(token, unsafe {(act as *const usize).add(6)}),
-        // );
-        process_inner.signal_actions.actions[signum] = Some(sigaction);
+        process_inner.signal_actions.actions[signum] = Some(sigaction.clone());
+        // println!("(sigaction new_handler:{:#X}, new_flag:{:#X}, new_mask:{:#X})", sigaction.sa_handler, sigaction.sa_flags.bits(), sigaction.sa_mask);
     }
 
     0
@@ -558,7 +538,8 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
     let token = current_user_token();
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
-    let mut mask = inner.signal_masks.bits();
+    let mut mask = inner.signal_masks;
+    let old_mask = mask;
 
     if old_set as usize != 0 {
         *translated_refmut(token, old_set) = mask;
@@ -575,8 +556,15 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
             SIG_SETMASK => mask = new_set,
             _ => return -1,
         }
-        inner.signal_masks = Signum::from_bits(mask & ((1 << MAX_SIG) - 1)).unwrap();
+        inner.signal_masks = mask;
     }
+    // println!(
+    //     "sys_sigprocmask(how: {}, old_mask: {:#x?}, mask: {:#x?}, pid: {}) = 0",
+    //     how,
+    //     old_mask,
+    //     mask,
+    //     current_process().getpid(),
+    // );
     0
 }
 

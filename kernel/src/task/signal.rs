@@ -63,7 +63,7 @@ bitflags! {
 
 bitflags! {
     /* Bits in `sa_flags'.  */
-    pub struct SaFlags: usize {
+    pub struct SaFlags: u32 {
         const SA_NOCLDSTOP = 1;     /* Don't send SIGCHLD when children stop.  */
         const SA_NOCLDWAIT = 2;     /* Don't create zombie on child death.  */
         const SA_SIGINFO   = 4;     /* Invoke signal-catching function with three arguments instead of one.  */
@@ -75,6 +75,7 @@ bitflags! {
     }
 }
 
+#[derive(Clone)]
 pub struct SignalStruct {
     pub actions: [Option<SigAction>; MAX_SIG + 1],
 }
@@ -168,14 +169,20 @@ impl Default for SaFlags {
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct SigAction {
-    /// 信号处理函数
+    // /// 信号处理函数
+    // pub sa_handler: usize,
+    // // pub sa_sigaction: usize,
+    // /// 指定信号处理的行为
+    // pub sa_flags: SaFlags,
+    // pub sa_restorer: usize,
+    // /// 信号处理函数执行期间需要屏蔽的信号
+    // pub sa_mask: u64,
+
     pub sa_handler: usize,
-    // pub sa_sigaction: usize,
-    /// 指定信号处理的行为
+    pub sa_sigaction: usize,
+    pub sa_mask: u64,
     pub sa_flags: SaFlags,
     pub sa_restorer: usize,
-    /// 信号处理函数执行期间需要屏蔽的信号
-    pub sa_mask: Signum,
 }
 
 #[repr(C)]
@@ -245,12 +252,12 @@ pub fn check_pending_signals() {
             let mut task_inner = task.inner_exclusive_access();
     
             let is_waiting = task_inner.signals.contains(signum);
-            let is_masked = task_inner.signal_masks.contains(signum);
+            let is_masked = task_inner.signal_masks & signum.bits() != 0;
     
             // 当前正在处理的信号的sigaction是否被指定屏蔽该信号
             let is_sigaction_masked =
                 if let Some(sigaction) = process_inner.signal_actions.actions[task_inner.signal_handling] {
-                    sigaction.sa_mask.contains(signum)
+                    sigaction.sa_mask & signum.bits() != 0
                 } else {
                     // 默认sigaction只屏蔽与自身相同的信号
                     signum.bits as usize == task_inner.signal_handling
