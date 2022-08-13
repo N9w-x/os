@@ -160,7 +160,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
 
 pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     let token = current_user_token();
-    let path = translated_str(token, path);
+    let mut path = translated_str(token, path);
     let mut args_vec: Vec<String> = Vec::new();
     loop {
         let arg_str_ptr = *translated_ref(token, args);
@@ -204,6 +204,13 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     //     }
     //     return 0;
     // }
+
+    // 执行./xxx.sh时，自动转化为 /busybox sh ./xxx.sh
+    if path.ends_with(".sh") {
+        args_vec.insert(0, String::from("sh"));
+        args_vec.insert(0, String::from("/busybox"));
+        path = String::from("/busybox");
+    }
 
     let process = current_process();
     if let Some(app_inode) = open_file(
@@ -511,12 +518,11 @@ pub fn sys_sigaction(signum: usize, act: *mut usize, oldact: *mut usize) -> isiz
     let mut process_inner = process.inner_exclusive_access();
 
     // 将原来的sigaction保存到oldact地址中
-    if let Some(old_sigaction) = process_inner.signal_actions.actions[signum] {
+    if let Some(old_sigaction) = &process_inner.signal_actions.actions[signum] {
         if oldact as usize != 0 {
-            *translated_refmut(token, oldact) = old_sigaction;
+            *translated_refmut(token, oldact) = old_sigaction.clone();
             // println!("(sigaction old_handler:{:#X}, old_flag:{:#X}, old_mask:{:#X})", old_sigaction.sa_handler, old_sigaction.sa_flags.bits(), old_sigaction.sa_mask);
         }
-        process_inner.signal_actions.actions[signum] = None;
     } else if oldact as usize != 0 {
         let sigact_old = translated_refmut(token, oldact);
         sigact_old.sa_handler = SIG_DFL;
@@ -543,6 +549,7 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
 
     if old_set as usize != 0 {
         *translated_refmut(token, old_set) = mask;
+        // println!("[sigprocmask] old_mask: {:#X}", mask);
     }
 
     if set as usize != 0 {
@@ -557,14 +564,8 @@ pub fn sys_sigprocmask(how: usize, set: *mut u64, old_set: *mut u64) -> isize {
             _ => return -1,
         }
         inner.signal_masks = mask;
+        // println!("[sigprocmask] new_mask: {:#X}", mask);
     }
-    // println!(
-    //     "sys_sigprocmask(how: {}, old_mask: {:#x?}, mask: {:#x?}, pid: {}) = 0",
-    //     how,
-    //     old_mask,
-    //     mask,
-    //     current_process().getpid(),
-    // );
     0
 }
 

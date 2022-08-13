@@ -429,36 +429,34 @@ impl MemorySet {
                     .copy_from_slice(src_ppn.get_bytes_array());
             }
         }
-        // // copy heap
-        // for (vpn, src_frame) in user_space.heap.iter() {
-        //     let dst_frame = frame_alloc().unwrap();
-        //     let dst_ppn = dst_frame.ppn;
-        //     memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
-        //     memory_set.heap.insert(*vpn, dst_frame);
-        
-        //     let src_ppn = src_frame.ppn;
-        //     // copy data
-        //     dst_ppn
-        //         .get_bytes_array()
-        //         .copy_from_slice(src_ppn.get_bytes_array());
-        // }
-        // // copy mmap
-        // for mmap_area in user_space.mmap_areas.iter() {
-        //     let mut new_mmap_area = MemoryMapArea::from_another(mmap_area);
-        //     for vpn in mmap_area.vpn_range {
-        //         if let Some(pte) = user_space.translate(vpn) {// lazy可能未分配内存
-        //             let src_ppn = pte.ppn();
-        //             let frame = frame_alloc().unwrap();
-        //             let dst_ppn = frame.ppn;
-        //             // copy data
-        //             dst_ppn
-        //                 .get_bytes_array()
-        //                 .copy_from_slice(src_ppn.get_bytes_array());
-        //             new_mmap_area.data_frames.insert(vpn, frame);
-        //         }
-        //     }
-        
-        // }
+        // copy heap
+        for (vpn, src_frame) in user_space.heap.iter() {
+            let dst_frame = frame_alloc().unwrap();
+            let dst_ppn = dst_frame.ppn;
+            memory_set.heap.insert(*vpn, dst_frame);
+            memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+
+            let src_ppn = src_frame.ppn;
+            // copy data
+            dst_ppn
+                .get_bytes_array()
+                .copy_from_slice(src_ppn.get_bytes_array());
+        }
+        // copy mmap
+        for mmap_area in user_space.mmap_areas.iter() {
+            let mut new_mmap_area = MemoryMapArea::from_another(mmap_area);
+            for (vpn, frame_tracker) in mmap_area.data_frames.iter() {
+                let src_ppn = frame_tracker.ppn;
+                let frame = frame_alloc().unwrap();
+                let dst_ppn = frame.ppn;
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
+                new_mmap_area.data_frames.insert(*vpn, frame);
+                memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::from_bits(mmap_area.map_perm.bits() as u16).unwrap());
+            }
+            memory_set.mmap_areas.push(new_mmap_area);
+        }
         memory_set.heap_base = user_space.heap_base;
         memory_set.heap_end = user_space.heap_end;
         memory_set.mmap_area_base = user_space.mmap_area_base;
@@ -509,13 +507,43 @@ impl MemorySet {
         }
         // heap
         for (vpn, frame_tracker) in user_space.heap.iter() {
-            memory_set.heap.insert(vpn.clone(), FrameTracker { ppn: frame_tracker.ppn });
+            let pte = page_table.translate_mut_ref(*vpn).unwrap();
+            let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
+            let ppn = pte.ppn();
+            assert_eq!(ppn, frame_tracker.ppn);
+            frame_add_ref(ppn);
+            pte.set_flags(flags);
+            memory_set.page_table.map(*vpn, ppn, flags);
+            memory_set.heap.insert(*vpn, FrameTracker { ppn });
         }
         memory_set.heap_base = user_space.heap_base;
         memory_set.heap_end = user_space.heap_end;
         // mmap
         for mmap_area in user_space.mmap_areas.iter() {
-            memory_set.mmap_areas.push(MemoryMapArea::from_another(mmap_area));
+            let mut child_mmap_area = MemoryMapArea::from_another(mmap_area);
+            // for (vpn, frame_tracker) in mmap_area.data_frames.iter() {
+            //     let pte = parent_page_table.translate_mut_ref(*vpn).unwrap();
+            //     let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
+            //     let ppn = pte.ppn();
+            //     assert_eq!(ppn, frame_tracker.ppn);
+            //     pte.set_flags(flags);
+            //     memory_set.page_table.map(*vpn, ppn, flags);
+            //     child_mmap_area.data_frames.insert(vpn.clone(), FrameTracker { ppn });
+            // }
+
+            child_mmap_area.map_all(&mut memory_set.page_table);
+            // 拷贝数据
+            for vpn in mmap_area.data_frames.keys() {
+                // debug!("mmap vpn copy {:#x}", vpn.0);
+                let src_ppn = user_space.translate(*vpn).unwrap().ppn();
+                let dst_ppn = memory_set.translate(*vpn).unwrap().ppn();
+                // debug!("mmap copy: src_ppn = {:#x?},  dst_ppn {:#x}", src_ppn.0, dst_ppn.0);
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(&src_ppn.get_bytes_array());
+            }
+
+            memory_set.mmap_areas.push(child_mmap_area);
         }
         memory_set.mmap_area_base = user_space.mmap_area_base;
         memory_set.mmap_area_end = user_space.mmap_area_end;
@@ -575,6 +603,7 @@ impl MemorySet {
     }
     
     pub fn print_mmap_area(&self) {
+        println!("this is mmap areas:");
         for area in &self.mmap_areas {
             println!("{:#}", area);
         }

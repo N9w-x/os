@@ -109,6 +109,17 @@ impl MemoryMapArea {
         }
     }
 
+    pub fn map_all(&mut self, page_table: &mut PageTable) {
+        for vpn in self.vpn_range {
+            let frame = frame_alloc().unwrap();
+            let ppn = frame.ppn;
+            let pte_flags = PTEFlags::from_bits(self.map_perm.bits() as u16).unwrap();
+            self.data_frames.insert(vpn, frame);
+            page_table.map(vpn, ppn, pte_flags);
+            // println!("[debug] vpn: 0x{:X} -> ppn: 0x{:X}", vpn.0, ppn.0);
+        }
+    }
+
     /// 分配内存, 同时映射文件
     /// 一次分配所有页
     pub fn map(

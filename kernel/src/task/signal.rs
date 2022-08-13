@@ -169,20 +169,20 @@ impl Default for SaFlags {
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct SigAction {
-    // /// 信号处理函数
-    // pub sa_handler: usize,
-    // // pub sa_sigaction: usize,
-    // /// 指定信号处理的行为
-    // pub sa_flags: SaFlags,
-    // pub sa_restorer: usize,
-    // /// 信号处理函数执行期间需要屏蔽的信号
-    // pub sa_mask: u64,
-
+    /// 信号处理函数
     pub sa_handler: usize,
-    pub sa_sigaction: usize,
-    pub sa_mask: u64,
+    // pub sa_sigaction: usize,
+    /// 指定信号处理的行为
     pub sa_flags: SaFlags,
     pub sa_restorer: usize,
+    /// 信号处理函数执行期间需要屏蔽的信号
+    pub sa_mask: u64,
+
+    // pub sa_handler: usize,
+    // pub sa_sigaction: usize,
+    // pub sa_mask: u64,
+    // pub sa_flags: SaFlags,
+    // pub sa_restorer: usize,
 }
 
 #[repr(C)]

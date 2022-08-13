@@ -9,7 +9,7 @@ use riscv::register::{
 pub use context::TrapContext;
 pub use pagefault::{lazy_check, cow_check};
 
-use crate::config::TRAMPOLINE;
+use crate::{config::TRAMPOLINE, mm::{translated_byte_buffer, translated_ref}};
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
 use crate::syscall::syscall;
 use crate::task::{
@@ -131,12 +131,14 @@ pub fn trap_handler() -> ! {
                 );
                 current_add_signal(Signum::SIGSEGV);
                 let process = current_process();
-                println!("this is mmap areas:");
                 process
                     .inner_exclusive_access()
                     .memory_set
                     .print_mmap_area();
-            }
+            } 
+            // else {
+            //     println!("[pagefault] val: {:#X}", translated_ref(current_user_token(), stval as *const usize));
+            // }
             unsafe {
                 asm!("sfence.vma");
                 asm!("fence.i");
