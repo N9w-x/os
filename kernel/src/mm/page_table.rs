@@ -354,7 +354,7 @@ pub struct UserBufferIterator {
 impl Iterator for UserBufferIterator {
     type Item = *mut u8;
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_buffer >= self.buffers.len() {
+        if self.current_buffer >= self.buffers.len() || self.current_idx >= self.buffers[self.current_buffer].len() {
             None
         } else {
             let r = &mut self.buffers[self.current_buffer][self.current_idx] as *mut _;
