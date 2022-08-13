@@ -92,6 +92,7 @@ impl From<VirtAddr> for usize {
         }
     }
 }
+
 impl From<VirtPageNum> for usize {
     fn from(v: VirtPageNum) -> Self {
         v.0
@@ -112,17 +113,20 @@ impl VirtAddr {
         self.page_offset() == 0
     }
 }
+
 impl From<VirtAddr> for VirtPageNum {
     fn from(v: VirtAddr) -> Self {
         assert_eq!(v.page_offset(), 0);
         v.floor()
     }
 }
+
 impl From<VirtPageNum> for VirtAddr {
     fn from(v: VirtPageNum) -> Self {
         Self(v.0 << PAGE_SIZE_BITS)
     }
 }
+
 impl PhysAddr {
     pub fn floor(&self) -> PhysPageNum {
         PhysPageNum(self.0 / PAGE_SIZE)
@@ -137,12 +141,14 @@ impl PhysAddr {
         self.page_offset() == 0
     }
 }
+
 impl From<PhysAddr> for PhysPageNum {
     fn from(v: PhysAddr) -> Self {
         assert_eq!(v.page_offset(), 0);
         v.floor()
     }
 }
+
 impl From<PhysPageNum> for PhysAddr {
     fn from(v: PhysPageNum) -> Self {
         Self(v.0 << PAGE_SIZE_BITS)
@@ -181,6 +187,16 @@ impl PhysPageNum {
     pub fn get_mut<T>(&self) -> &'static mut T {
         let pa: PhysAddr = (*self).into();
         pa.get_mut()
+    }
+    
+    pub fn slice_u8(&self) -> &'static mut [u8] {
+        let pa = PhysAddr::from(*self);
+        unsafe { core::slice::from_raw_parts_mut(pa.0 as *mut u8, PAGE_SIZE) }
+    }
+    
+    pub fn slice_usize(&self) -> &'static mut [usize] {
+        let pa = PhysAddr::from(*self);
+        unsafe { core::slice::from_raw_parts_mut(pa.0 as *mut usize, PAGE_SIZE) }
     }
 }
 

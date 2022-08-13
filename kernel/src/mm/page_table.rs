@@ -4,6 +4,8 @@ use alloc::vec::Vec;
 
 use bitflags::*;
 
+use crate::config::PAGE_SIZE;
+
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 
 bitflags! {
@@ -58,7 +60,7 @@ impl PageTableEntry {
     }
     pub fn set_flags(&mut self, flags: PTEFlags) {
         self.bits = (self.bits & !0xFF) | (flags.bits() as usize)
-    }    
+    }
     // pub fn set_flags(&mut self, flags: usize) {
     //     self.bits = (self.bits & !0b1110usize) | (flags & 0b1110usize);
     // }
@@ -78,7 +80,7 @@ impl PageTable {
             frames: vec![frame],
         }
     }
-    
+
     /// Temporarily used to get arguments from user space.
     pub fn from_token(satp: usize) -> Self {
         Self {
@@ -86,7 +88,7 @@ impl PageTable {
             frames: Vec::new(),
         }
     }
-    
+
     fn find_pte_create(&mut self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
@@ -182,9 +184,8 @@ impl PageTable {
             if !pte.is_valid() {
                 return false;
             }
-            pte.bits = pte.ppn().0 << 10
-                | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
-                true
+            pte.bits = pte.ppn().0 << 10 | (flags | PTEFlags::U | PTEFlags::V).bits() as usize;
+            true
         } else {
             false
         }
@@ -275,7 +276,7 @@ impl UserBuffer {
     
     //从第一个buf开始写入,返回写入长度 返回0 表示写入失败
     pub fn write(&mut self, buf: &[u8]) -> usize {
-        assert!(self.buffers.len() >= 1);
+        assert!(!self.buffers.is_empty());
         let len = self.len().min(buf.len());
         let mut write_len = 0;
         for buffer in self.buffers.iter_mut() {

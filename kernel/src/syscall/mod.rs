@@ -92,6 +92,7 @@ const SYSCALL_MPROTECT: usize = 226;
 const SYSCALL_GET_UID: usize = 174;
 const SYSCALL_SYSINFO: usize = 179;
 const SYSCALL_SEND_FILE: usize = 71;
+const SYSCALL_FACCESSAT: usize = 48;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_GET_TID, 178);
@@ -108,10 +109,14 @@ mod thread;
 mod utils;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
-    //    println!("{}", color!(format!("syscall id: {}", syscall_id), INFO));
-    // }
-
+    if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
+        println!(
+            "{} args:{:x?}",
+            color!(format!("syscall id: {}", syscall_id), INFO),
+            args
+        );
+    }
+    
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -173,7 +178,14 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         // ),
         SYSCALL_BRK => sys_brk(args[0]),
         SYSCALL_MUNMAP => sys_munmap(args[0], args[1]),
-        SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2], args[3], args[4] as isize, args[5]),
+        SYSCALL_MMAP => sys_mmap(
+            args[0],
+            args[1],
+            args[2],
+            args[3],
+            args[4] as isize,
+            args[5],
+        ),
         SYSCALL_TIMES => sys_get_times(args[0] as *mut u64),
         SYSCALL_UNAME => sys_uname(args[0] as *mut u8),
         SYSCALL_SET_TID_ADDRESS => sys_set_tid_address(args[0]),
@@ -234,6 +246,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_PPOLL => sys_ppoll(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         SYSCALL_SYSINFO => sys_sysinfo(args[0] as _),
         SYSCALL_SEND_FILE => sys_sendfile(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
+        SYSCALL_FACCESSAT => sys_faccessat(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),

@@ -266,7 +266,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             total_read += dirent_size;
         }
     }
-    
+
     if total_read == dir_inode.get_size() {
         0
     } else {
@@ -304,7 +304,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
     } else {
         let fd_usize = fd as usize;
         let inner = pcb.inner_exclusive_access();
-    
+
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
@@ -757,6 +757,8 @@ pub fn sys_ppoll(
     ret
 }
 
+const SEND_FILE_BUF_SIZE: usize = 0x10000;
+
 pub fn sys_sendfile(out_fd: isize, in_fd: isize, offset: *mut usize, len: usize) -> isize {
     let process = current_process();
     let inner = process.inner_exclusive_access();
@@ -785,14 +787,52 @@ pub fn sys_sendfile(out_fd: isize, in_fd: isize, offset: *mut usize, len: usize)
         }
     }
     
-    let mut buf = vec![0u8; len];
+    let mut buf = if len > SEND_FILE_BUF_SIZE {
+        vec![0u8; SEND_FILE_BUF_SIZE]
+    } else {
+        vec![0u8; len]
+    };
+    let len = buf.len();
     let buf_read = UserBuffer::new(vec![unsafe {
         core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), len)
     }]);
     let read_len = file_in.read(buf_read);
     
+    //only write read_len size buf
     let buf_write = UserBuffer::new(vec![unsafe {
-        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), len)
+        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), read_len)
     }]);
     file_out.write(buf_write) as isize
+}
+
+pub fn sys_faccessat(dir_fd: isize, path: *const u8, _mode: usize, flags: usize) -> isize {
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
+    let token = inner.get_user_token();
+    
+    let path = translated_str(token, path);
+    let flags = unsafe { OpenFlags::from_bits_unchecked(flags as u32) };
+    
+    match if WorkPath::is_abs_path(&path) {
+        open_file("/", &path, flags, FileType::Regular)
+    } else if dir_fd == AT_FD_CWD {
+        let work_path = inner.work_path.to_string();
+        open_file(&work_path, &path, flags, FileType::Regular)
+    } else {
+        let fd_usize = dir_fd as usize;
+        if fd_usize >= inner.fd_table.len() {
+            return -EBADF;
+        }
+        
+        if let Some(FileDescriptor::Regular(inode)) = &inner.fd_table[fd_usize] {
+            if inode.find(&path, flags).is_some() {
+                return 0;
+            }
+        }
+        
+        return -ENOENT;
+    } {
+        Some(_) => 0,
+        _ => -ENOENT,
+    }
 }

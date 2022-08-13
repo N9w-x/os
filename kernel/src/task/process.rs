@@ -332,7 +332,7 @@ impl ProcessControlBlock {
         //println!("args: {:#?}", args);
         /////////// envp [] /////////////////
         let envs = vec![
-            String::from("SHELL=/user_shell"),
+            String::from("SHELL=/bin/sh"),
             String::from("PWD=/"),
             String::from("USER=root"),
             String::from("MOTD_SHOWN=pam"),
@@ -346,7 +346,7 @@ impl ProcessControlBlock {
             String::from("LOGNAME=root"),
             String::from("HOME=/"),
             String::from("LD_LIBRARY_PATH=/"),
-            String::from("PATH=/"),
+            String::from("PATH=/:/bin/"),
         ];
         // substitute memory_set
         let mut inner = self.inner_exclusive_access();
