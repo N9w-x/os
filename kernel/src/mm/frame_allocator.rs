@@ -100,6 +100,9 @@ impl StackFrameAllocator {
     fn get_ref(&self, ppn: PhysPageNum) -> usize {
         *self.ref_count.get(&ppn.0).unwrap() as usize
     }
+    fn get_rest(&self) -> usize {
+        self.end - self.current + self.recycled.len()
+    }
 }
 
 type FrameAllocatorImpl = StackFrameAllocator;
@@ -136,6 +139,10 @@ pub fn frame_get_ref(ppn: PhysPageNum) -> usize {
 
 pub fn frame_dealloc(ppn: PhysPageNum) {
     FRAME_ALLOCATOR.lock().dealloc(ppn);
+}
+
+pub fn frame_get_rest() {
+    println!("remain {} pages.", FRAME_ALLOCATOR.lock().get_rest());
 }
 
 #[allow(unused)]
