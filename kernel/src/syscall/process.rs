@@ -232,15 +232,17 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         // drop(inner);
         let fd_table = process.inner_exclusive_access().fd_table.clone();
         // println!("[debug] before kmmap:");
-        // crate::mm::get_rest();
+        // crate::mm::frame_get_rest();
         let elf_buf = process.kmmap(0, len, fd as isize, 0, 0, &fd_table);
+        // println!("[debug] after kmmap:");
+        // crate::mm::frame_get_rest();
         let argc = args_vec.len();
         unsafe {
             let elf_ref = slice::from_raw_parts(elf_buf as *const u8, len);
             process.exec(elf_ref, args_vec);
         }
-        // println!("[debug] after kmmap:");
-        // crate::mm::get_rest();
+        // println!("[debug] after exec:");
+        // crate::mm::frame_get_rest();
         process.kmunmap(elf_buf, len);
         process.inner_exclusive_access().fd_table[fd] = None;
         0

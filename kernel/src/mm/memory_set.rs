@@ -18,6 +18,7 @@ use crate::config::{
 };
 use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::aux::AuxHeader;
+use crate::mm::frame_allocator::FRAME_ALLOCATOR;
 use crate::mm::mmap::MemoryMapArea;
 
 use super::frame_allocator::{frame_add_ref, frame_get_ref};
@@ -505,22 +506,36 @@ impl MemorySet {
                 memory_set.areas.push(new_area);
             }
         }
+
+        // ! 因未知错误，heap/mmap暂时不CoW
         // heap
-        for (vpn, frame_tracker) in user_space.heap.iter() {
-            let pte = page_table.translate_mut_ref(*vpn).unwrap();
-            let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
-            let ppn = pte.ppn();
-            assert_eq!(ppn, frame_tracker.ppn);
-            frame_add_ref(ppn);
-            pte.set_flags(flags);
-            memory_set.page_table.map(*vpn, ppn, flags);
-            memory_set.heap.insert(*vpn, FrameTracker { ppn });
+        // for (vpn, frame_tracker) in user_space.heap.iter() {
+            // let pte = page_table.translate_mut_ref(*vpn).unwrap();
+            // let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
+            // let ppn = pte.ppn();
+            // assert_eq!(ppn, frame_tracker.ppn);
+            // frame_add_ref(ppn);
+            // pte.set_flags(flags);
+            // memory_set.page_table.map(*vpn, ppn, flags);
+            // memory_set.heap.insert(*vpn, FrameTracker { ppn });
+        // }
+        for (vpn, src_frame) in user_space.heap.iter() {
+            let dst_frame = frame_alloc().unwrap();
+            let dst_ppn = dst_frame.ppn;
+            memory_set.heap.insert(*vpn, dst_frame);
+            memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+
+            let src_ppn = src_frame.ppn;
+            // copy data
+            dst_ppn
+                .get_bytes_array()
+                .copy_from_slice(src_ppn.get_bytes_array());
         }
         memory_set.heap_base = user_space.heap_base;
         memory_set.heap_end = user_space.heap_end;
         // mmap
         for mmap_area in user_space.mmap_areas.iter() {
-            let mut child_mmap_area = MemoryMapArea::from_another(mmap_area);
+            // let mut child_mmap_area = MemoryMapArea::from_another(mmap_area);
             // for (vpn, frame_tracker) in mmap_area.data_frames.iter() {
             //     let pte = parent_page_table.translate_mut_ref(*vpn).unwrap();
             //     let flags = pte.flags() & !PTEFlags::W | PTEFlags::COW;
@@ -531,19 +546,18 @@ impl MemorySet {
             //     child_mmap_area.data_frames.insert(vpn.clone(), FrameTracker { ppn });
             // }
 
-            child_mmap_area.map_all(&mut memory_set.page_table);
-            // 拷贝数据
-            for vpn in mmap_area.data_frames.keys() {
-                // debug!("mmap vpn copy {:#x}", vpn.0);
-                let src_ppn = user_space.translate(*vpn).unwrap().ppn();
-                let dst_ppn = memory_set.translate(*vpn).unwrap().ppn();
-                // debug!("mmap copy: src_ppn = {:#x?},  dst_ppn {:#x}", src_ppn.0, dst_ppn.0);
+            let mut new_mmap_area = MemoryMapArea::from_another(mmap_area);
+            for (vpn, frame_tracker) in mmap_area.data_frames.iter() {
+                let src_ppn = frame_tracker.ppn;
+                let frame = frame_alloc().unwrap();
+                let dst_ppn = frame.ppn;
                 dst_ppn
                     .get_bytes_array()
-                    .copy_from_slice(&src_ppn.get_bytes_array());
+                    .copy_from_slice(src_ppn.get_bytes_array());
+                new_mmap_area.data_frames.insert(*vpn, frame);
+                memory_set.page_table.map(*vpn, dst_ppn, PTEFlags::from_bits(mmap_area.map_perm.bits() as u16).unwrap());
             }
-
-            memory_set.mmap_areas.push(child_mmap_area);
+            memory_set.mmap_areas.push(new_mmap_area);
         }
         memory_set.mmap_area_base = user_space.mmap_area_base;
         memory_set.mmap_area_end = user_space.mmap_area_end;

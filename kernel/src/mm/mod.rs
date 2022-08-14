@@ -1,6 +1,6 @@
 pub use address::{align_up, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum, VPNRange};
 pub use aux::AuxHeader;
-pub use frame_allocator::{add_free, frame_alloc, frame_dealloc, FrameTracker};
+pub use frame_allocator::{add_free, frame_alloc, frame_dealloc, FrameTracker, frame_get_rest};
 pub use heap_allocator::get_rest;
 pub use mmap::MemoryMapArea;
 pub use memory_set::{KERNEL_SPACE, MapPermission, MemorySet, KERNEL_TOKEN, remap_test};
