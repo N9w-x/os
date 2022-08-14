@@ -48,7 +48,7 @@ impl OSInode {
         //通过预分配内存空间减少拷贝次数
         let file_size = inner.inode.get_size();
         let mut vec = Vec::with_capacity(file_size as usize);
-    
+
         loop {
             //分块读取文件内容
             let size = inner.inode.read_at(inner.offset, &mut buf);
@@ -121,15 +121,15 @@ impl OSInode {
     pub fn set_offset(&self, offset: usize) {
         self.inner.lock().offset = offset;
     }
-    
+
     pub fn get_offset(&self) -> usize {
         self.inner.lock().offset
     }
-    
+
     pub fn set_modification_time(&self, mtime: u64) {
         self.inner.lock().mtime = mtime;
     }
-    
+
     pub fn modification_time(&self) -> u64 {
         self.inner.lock().mtime
     }
@@ -182,9 +182,12 @@ impl OSInode {
         })
     }
     
-    pub fn get_dirent(&self, dirent: &mut Dirent) -> isize {
+    pub fn get_dirent(&self, dirent: &mut Dirent, offset: usize) -> isize {
         let mut inner = self.inner.lock();
-        if let Some((name, offset, first_clu, attr)) = inner.inode.dirent_info(inner.offset) {
+        if let Some((mut name, offset, first_clu, attr)) =
+        inner.inode.dirent_info(inner.offset + offset)
+        {
+            name.push('\0');
             let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
                 DTYPE_REG
             } else if attr & ATTRIBUTE_DIRECTORY != 0 {
@@ -192,7 +195,7 @@ impl OSInode {
             } else {
                 DTYPE_UNKNOWN
             };
-    
+            
             dirent.fill_info(
                 &name,
                 first_clu as u64,
@@ -200,13 +203,15 @@ impl OSInode {
                 (offset as usize - inner.offset) as u16,
                 d_type,
             );
-    
             inner.offset = offset as usize;
-            let len = (name.len() + 8 * 4) as isize;
-            len
+            (name.len() + 8 * 4) as isize
         } else {
             -1
         }
+    }
+    
+    pub fn dirent_info(&self, offset: usize) -> Option<(String, u32, u32, u8)> {
+        self.inner.lock().inode.dirent_info(offset)
     }
     
     pub fn get_fstat(&self, fstat: &mut Kstat) {

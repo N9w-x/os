@@ -1,4 +1,5 @@
 use alloc::format;
+use core::ops::Not;
 
 use errno::*;
 use fs::*;
@@ -117,7 +118,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //     );
     // }
     
-    match syscall_id {
+    let ret = match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
         SYSCALL_OPEN => sys_open(args[0] as isize, args[1] as *const u8, args[2] as u32),
@@ -255,5 +256,10 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             println!("{}", log);
             0
         } //_ => 0,
-    }
+    };
+    //if [SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id).not() {
+    //    println!("syscall_id: {}, args: {:x?} ,ret={}", syscall_id, args, ret);
+    //}
+    
+    ret
 }

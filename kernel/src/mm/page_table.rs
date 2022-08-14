@@ -108,7 +108,7 @@ impl PageTable {
         }
         result
     }
-    
+
     fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
@@ -268,10 +268,11 @@ impl UserBuffer {
         total
     }
     
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> usize {
         for buffer in self.buffers.iter_mut() {
             buffer.iter_mut().map(|byte| *byte = 0);
         }
+        self.len()
     }
     
     //从第一个buf开始写入,返回写入长度 返回0 表示写入失败

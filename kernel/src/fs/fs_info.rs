@@ -6,13 +6,13 @@ pub const DTYPE_DIR: u8 = 4;
 pub const DTYPE_REG: u8 = 4;
 pub const DTYPE_UNKNOWN: u8 = 0;
 
-#[repr(C)]
+#[repr(packed)]
 pub struct Dirent {
     d_ino: u64,
     offset: i64,
     dirent_len: u16,
     d_type: u8,
-    d_name: [u8; 128],
+    //d_name: [u8; 128],
 }
 
 impl Dirent {
@@ -22,17 +22,17 @@ impl Dirent {
             offset: 0,
             dirent_len: 0,
             d_type: 0,
-            d_name: [0; 128],
+            //d_name: [0; 128],
         }
     }
     
-    pub fn new(name: &str, inode_id: u64, offset: i64, dirent_len: u16, d_type: u8) -> Self {
+    pub fn new(inode_id: u64, offset: i64, dirent_len: u16, d_type: u8) -> Self {
         Self {
             d_ino: inode_id,
             offset,
             dirent_len,
             d_type,
-            d_name: Dirent::str2bytes(name),
+            //d_name: Dirent::str2bytes(name),
         }
     }
     
@@ -42,10 +42,10 @@ impl Dirent {
             offset,
             dirent_len,
             d_type,
-            d_name: Self::str2bytes(name),
+            //d_name: Self::str2bytes(name),
         };
     }
-    
+
     fn str2bytes(str: &str) -> [u8; 128] {
         let bytes = str.as_bytes();
         let len = bytes.len();
@@ -96,7 +96,7 @@ bitflags! {
         const S_IROTH   = 0o0004; //others have read permission
         const S_IWOTH   = 0o0002; //others have write permission
         const S_IXOTH   = 0o0001; //others have execute permission
-        
+
     }
 }
 
@@ -192,11 +192,11 @@ pub struct PollFD {
     pub revents: i16,
 }
 
-pub const POLLIN: i16 = 0x001;      /* There is data to read */
-pub const POLLPRI: i16 = 0x002;     /* There is urgent data to read */
-pub const POLLOUT: i16 = 0x004;     /* Writing now will not block */
-pub const POLLERR: i16 = 0x008;     /* Error condition (output only) */
-pub const POLLHUP: i16 = 0x010;     /* Hang up (output only) */
-pub const POLLNVAL: i16 = 0x020;    /* Invalid request: fd not open (output only) */
-pub const POLLRDNORM: i16 = 0x040;  /* Equivalent to POLLIN */
-pub const POLLRDBAND: i16 = 0x080;  /* Priority band data can be read (generally unused on Linux) */
+pub const POLLIN: i16 = 0x001; /* There is data to read */
+pub const POLLPRI: i16 = 0x002; /* There is urgent data to read */
+pub const POLLOUT: i16 = 0x004; /* Writing now will not block */
+pub const POLLERR: i16 = 0x008; /* Error condition (output only) */
+pub const POLLHUP: i16 = 0x010; /* Hang up (output only) */
+pub const POLLNVAL: i16 = 0x020; /* Invalid request: fd not open (output only) */
+pub const POLLRDNORM: i16 = 0x040; /* Equivalent to POLLIN */
+pub const POLLRDBAND: i16 = 0x080; /* Priority band data can be read (generally unused on Linux) */

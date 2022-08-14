@@ -21,6 +21,7 @@ mod io_vec;
 mod path;
 mod pipe;
 mod stdio;
+mod dev_fs;
 
 pub trait File: Send + Sync {
     fn readable(&self) -> bool;

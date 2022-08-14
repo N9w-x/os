@@ -5,13 +5,15 @@ use alloc::vec::Vec;
 use core::iter::FromIterator;
 use core::mem::size_of;
 
-use fat32::DIRENT_SZ;
+use fat32::{ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY, DIRENT_SZ};
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
+use spin::Mutex;
 
 use crate::console::INFO;
 use crate::fs::{
-    ch_dir, Dirent, File, FileDescriptor, FileType, get_current_inode, IOVec, Kstat, make_pipe,
-    open_file, OpenFlags, OSInode, PollFD, POLLIN, VFSFlag, WorkPath,
+    ch_dir, Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, File, FileDescriptor, FileType, get_current_inode,
+    IOVec, Kstat, make_pipe, open_file, OpenFlags, OSInode, PollFD, POLLIN, VFSFlag,
+    WorkPath,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
@@ -229,14 +231,43 @@ pub fn sys_dup3(old_fd: usize, new_fd: usize) -> isize {
     new_fd as isize
 }
 
+fn getdents64_inner(file: Arc<OSInode>, user_buf: &mut UserBuffer, len: usize) -> isize {
+    let mut offset = file.get_offset();
+    let dirent_size = core::mem::size_of::<Dirent>();
+    let mut total_read = 0;
+    loop {
+        if let Some((mut name, new_offset, first_clu, attr)) = file.dirent_info(offset) {
+            name.push('\0');
+            let size = dirent_size + name.len();
+            if total_read + size > len {
+                break;
+            }
+            let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
+                DTYPE_REG
+            } else if attr & ATTRIBUTE_DIRECTORY != 0 {
+                DTYPE_DIR
+            } else {
+                DTYPE_UNKNOWN
+            };
+            let dirent = Dirent::new(first_clu as u64, new_offset as i64, size as u16, d_type);
+            user_buf.write_at(total_read, dirent.as_bytes());
+            user_buf.write_at(total_read + dirent_size, name.as_bytes());
+            total_read += size;
+            offset = new_offset as usize;
+        } else {
+            break;
+        }
+    }
+    file.set_offset(offset);
+    total_read as isize
+}
+
 //默认len 是 dirent_size的倍数
 pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, len));
-    let dirent_size = core::mem::size_of::<Dirent>();
-    let mut total_read = 0;
-
+    
     //我为什么会喜欢这种写法(
     let dir_inode = if fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
@@ -257,21 +288,8 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             _ => return -1,
         }
     };
-
-    let read_times = len / DIRENT_SZ;
-    let mut dirent = Dirent::default();
-    for _ in 0..read_times {
-        if dir_inode.get_dirent(&mut dirent) > 0 {
-            user_buf.write_at(total_read, dirent.as_bytes());
-            total_read += dirent_size;
-        }
-    }
-
-    if total_read == dir_inode.get_size() {
-        0
-    } else {
-        dirent_size as isize
-    }
+    
+    getdents64_inner(dir_inode, &mut user_buf, len)
 }
 
 //暂时不支持挂载(开摆
@@ -313,7 +331,7 @@ pub fn sys_fstat(fd: isize, kstat: *const u8) -> isize {
             _ => return -1,
         }
     };
-    
+
     os_inode.get_fstat(&mut kstat);
     user_buf.write(kstat.as_bytes());
     0
@@ -323,7 +341,7 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
     let pcb = current_process();
-    
+
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDWR, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -332,11 +350,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     } else {
         let fd_usize = fd as usize;
         let mut inner = pcb.inner_exclusive_access();
-        
+
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-        
+    
         match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
             _ => return -1,
@@ -350,9 +368,17 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     0
 }
 
+//static mut COUNT: usize = 0;
+
 // todo 基本上所有的文件相关的系统调用都是一个样式,有时间的话之后抽象一下吧
 // 假如真的有时间的话
 pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -> isize {
+    //unsafe {
+    //    COUNT += 1;
+    //    if COUNT >= 10 {
+    //        unreachable!()
+    //    }
+    //}
     let token = current_user_token();
     let path = translated_str(token, path);
     let pcb = current_process();
@@ -438,20 +464,21 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
 // }
 
 pub fn sys_ioctl(fd: usize, cmd: usize) -> isize {
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
-    
-    if fd as usize >= inner.fd_table.len() {
-        return -1;
-    }
-    
-    if let Some(descriptor) = &inner.fd_table[fd] {
-        let file = descriptor.clone();
-        drop(inner);
-        file.ioctl(cmd)
-    } else {
-        -1
-    }
+    //let process = current_process();
+    //let mut inner = process.inner_exclusive_access();
+    //
+    //if fd as usize >= inner.fd_table.len() {
+    //    return -1;
+    //}
+    //
+    //if let Some(descriptor) = &inner.fd_table[fd] {
+    //    let file = descriptor.clone();
+    //    drop(inner);
+    //    file.ioctl(cmd)
+    //} else {
+    //    -1
+    //}
+    0
 }
 
 // 因为这里不会有AT_FD_CWD这种情况,所以fd类型为usize
@@ -495,11 +522,10 @@ pub fn sys_readv(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
     drop(inner);
     let mut ret = 0isize;
     if let Some(file) = &fd_table[fd] {
-        let f: Arc<dyn File + Send + Sync>;
-        match file {
-            FileDescriptor::Regular(os_inode) => f = os_inode.clone(),
-            FileDescriptor::Abstract(os_inode) => f = os_inode.clone(),
-        }
+        let f: Arc<dyn File + Send + Sync> = match file {
+            FileDescriptor::Regular(os_inode) => os_inode.clone(),
+            FileDescriptor::Abstract(os_inode) => os_inode.clone(),
+        };
         if !f.readable() {
             return -EPERM;
         }
