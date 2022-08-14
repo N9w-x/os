@@ -17,14 +17,13 @@ BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
 K210_BOOTLOADER_SIZE := 131072
 
 # RUN MODE
-RUN_MODE ?= shell
-#
-ifeq ($(RUN_MODE) , shell)
-	SHELL_PATH := ../sdcard_file/user_shell
-else ifeq ($(RUN_MODE) , autotest)
-	SHELL_PATH := ../sdcard_file/autoshell
-else ifeq ($(RUN_MODE), finaltest)
-	SHELL_PATH := ../final-file/finalshell
+RUN_MODE ?= 
+STAGE ?= final2
+
+ifeq ($(RUN_MODE), autotest)
+	SHELL_PATH := ../bin/shell/$(STAGE)_shell
+else
+	SHELL_PATH := ../bin/shell/user_shell
 endif
 
 # Building mode argument
@@ -89,8 +88,7 @@ img-lite:
 	@mkfs.vfat -F 32 -C fat32.img 81920
 	@mkdir mnt -p
 	@sudo mount -o loop -t vfat fat32.img mnt
-	@#sudo cp -r  ../final-file/* ./mnt
-	@sudo cp -r  ../sdcard_file/* ./mnt
+	@sudo cp -r  ../bin/$(STAGE)/* ./mnt
 	@sudo umount ./mnt
 
 $(APPS):

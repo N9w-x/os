@@ -1,2 +1,2 @@
 all:
-	make -C kernel handin-qemu BOARD=qemu RUN_MODE=autotest
+	make -C kernel handin-k210 BOARD=k210 RUN_MODE=autotest
