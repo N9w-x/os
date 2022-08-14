@@ -1,9 +1,9 @@
+clear
 echo "#### independent command test"
 ash -c exit
 sh -c exit
 basename /aaa/bbb
 cal
-# clear
 date 
 df 
 dirname /aaa/bbb

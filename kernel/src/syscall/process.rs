@@ -27,8 +27,13 @@ use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC
 use alloc::slice;
 
 pub fn sys_exit(exit_code: i32) -> ! {
-    exit_current_and_run_next(exit_code);
+    exit_current_and_run_next(exit_code, false);
     panic!("Unreachable in sys_exit!");
+}
+
+pub fn sys_exit_group(exit_code: i32) -> ! {
+    exit_current_and_run_next(exit_code, true);
+    panic!("Unreachable in sys_exit_group!");
 }
 
 pub fn sys_yield() -> isize {
@@ -274,9 +279,11 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
     // }
 }
 
+const WNOHANG: isize = 1;
+
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
-pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
+pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32, options: isize) -> isize {
     loop {
         let mut found = true;
         let mut exited = true;
@@ -320,6 +327,9 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
             }
         }
         assert!(!found || !exited);
+        if !found || options == WNOHANG {
+            return -EPERM;
+        }
         suspend_current_and_run_next();
 
         //let process = current_process();

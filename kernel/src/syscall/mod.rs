@@ -109,13 +109,13 @@ mod thread;
 mod utils;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
-        println!(
-            "{} args:{:x?}",
-            color!(format!("syscall id: {}", syscall_id), INFO),
-            args
-        );
-    }
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
+    //     println!(
+    //         "{} args:{:x?}",
+    //         color!(format!("syscall id: {}", syscall_id), INFO),
+    //         args
+    //     );
+    // }
     
     match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
@@ -136,7 +136,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_IOCTL => sys_ioctl(args[0], args[1]),
         SYSCALL_CLONE => sys_clone(args[0], args[1], args[2], args[3], args[4]),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
-        SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
+        SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32, args[2] as isize),
         SYSCALL_THREAD_CREATE => sys_thread_create(args[0], args[1]),
         SYSCALL_GET_TID => sys_gettid(),
         SYSCALL_WAITTID => sys_waittid(args[0]) as isize,
@@ -199,7 +199,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[2] as *mut u8,
             args[3] as isize,
         ),
-        SYSCALL_EXIT_GROUP => sys_exit(args[0] as i32),
+        SYSCALL_EXIT_GROUP => sys_exit_group(args[0] as i32),
         SYSCALL_WRITEV => sys_writev(args[0], args[1], args[2]),
         SYSCALL_READV => sys_readv(args[0], args[1], args[2]),
         SYSCALL_UTIMENSAT => sys_utimensat(

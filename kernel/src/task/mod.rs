@@ -84,7 +84,7 @@ pub fn unblock_task(task: Arc<TaskControlBlock>) {
     add_task(task);
 }
 
-pub fn exit_current_and_run_next(exit_code: i32) {
+pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
     let token = current_user_token();
     let task = take_current_task().unwrap();
     let tid = task.gettid();
@@ -107,7 +107,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(task);
     // however, if this is the main thread of current process
     // the process should terminate at once
-    if id == 0 {
+    if id == 0 || is_exit_group {
         remove_from_pid2process(process.getpid());
         let mut process_inner = process.inner_exclusive_access();
         // mark this process as a zombie process

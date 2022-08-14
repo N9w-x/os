@@ -174,7 +174,7 @@ pub fn trap_handler() -> ! {
     // check signals
     if let Some((errno, msg)) = check_signals_of_current() {
         println!("[kernel] {}", msg);
-        exit_current_and_run_next(errno);
+        exit_current_and_run_next(errno, false);
     }
     
     trap_return();
