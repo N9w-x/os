@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use fat32::VFile;
 
+pub use dev_fs::open_dev_file;
 pub use file_descriptor::FileDescriptor;
 pub use fs_info::*;
 pub use inode::{ch_dir, FileType, init_rootfs, list_apps, open_file, OpenFlags, OSInode};
@@ -14,6 +15,7 @@ pub use stdio::{Stdin, Stdout};
 
 use crate::mm::UserBuffer;
 
+mod dev_fs;
 mod file_descriptor;
 mod fs_info;
 mod inode;
@@ -21,7 +23,6 @@ mod io_vec;
 mod path;
 mod pipe;
 mod stdio;
-mod dev_fs;
 
 pub trait File: Send + Sync {
     fn readable(&self) -> bool;
@@ -31,13 +32,20 @@ pub trait File: Send + Sync {
     fn ioctl(&self, cmd: usize) -> isize {
         0
     }
+    fn read_blocked(&self) -> bool {
+        false
+    }
+    fn write_blocked(&self) -> bool {
+        false
+    }
 }
 
 pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
-    if curr_path == "/" || curr_path.contains("^/") {
+    if curr_path == "/" || curr_path.starts_with('/') {
         ROOT_INODE.clone()
     } else {
-        let path: Vec<&str> = curr_path.split("/").collect();
+        println!("{}", curr_path);
+        let path: Vec<&str> = curr_path.split('/').collect();
         ROOT_INODE.find_vfile_bypath(&path).unwrap()
     }
 }

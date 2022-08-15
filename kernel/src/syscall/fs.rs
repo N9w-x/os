@@ -7,19 +7,21 @@ use core::mem::size_of;
 
 use fat32::{ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY, DIRENT_SZ};
 use k210_pac::spi0::ctrlr0::FRAME_FORMAT_A::QUAD;
+use riscv::register::mstatus::XS::SomeDirty;
 use spin::Mutex;
 
 use crate::console::INFO;
 use crate::fs::{
-    ch_dir, Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, File, FileDescriptor, FileType, get_current_inode,
-    IOVec, Kstat, make_pipe, open_file, OpenFlags, OSInode, PollFD, POLLIN, VFSFlag,
-    WorkPath,
+    ch_dir, Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, FdSet, File, FileDescriptor,
+    FileType, get_current_inode, IOVec, Kstat, make_pipe, open_dev_file, open_file, OpenFlags, OSInode,
+    PollFD, POLLIN, VFSFlag, WorkPath,
 };
 use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
 use crate::task::{
-    current_process, current_task, current_user_token, Signum, TimeSpec, UTIME_NOW, UTIME_OMIT,
+    current_process, current_task, current_user_token, Signum, suspend_current_and_run_next,
+    TimeSpec, UTIME_NOW, UTIME_OMIT,
 };
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
@@ -75,41 +77,49 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     // println!("{}", color!(format!("[open] path:{}", path), INFO));
     //rcore-tutorial和ultra os 你们可上点心吧
     let flags = unsafe { OpenFlags::from_bits_unchecked(flags) };
-    //获取要打开文件的inode
-    match if WorkPath::is_abs_path(&path) {
-        open_file("/", &path, flags, FileType::Regular)
-    } else if fd == AT_FD_CWD {
-        let work_path = process.inner_exclusive_access().work_path.to_string();
-        open_file(&work_path, &path, flags, FileType::Regular)
+    
+    //dev文件仅保存在内存中
+    if let Some(dev_fs) = open_dev_file(&path) {
+        let mut inner = process.inner_exclusive_access();
+        let fd = inner.alloc_fd();
+        inner.fd_table[fd] = Some(FileDescriptor::Abstract(dev_fs));
+        fd as isize
     } else {
-        ////相对于fd的相对路径
-        let inner = process.inner_exclusive_access();
-        let fd_usize = fd as usize;
-        if fd_usize >= inner.fd_table.len() {
-            return -EPERM;
-        }
-        //todo rcore tutorial使用的锁和spin::mutex冲突了..
-        let res = inner.fd_table[fd_usize].clone();
-        drop(inner);
-        match res {
-            Some(FileDescriptor::Regular(os_inode)) => {
-                if flags.contains(OpenFlags::CREATE) {
-                    os_inode.create(&path, FileType::Regular)
-                } else {
-                    os_inode.find(&path, flags)
-                }
+        //获取要打开文件的inode
+        match if WorkPath::is_abs_path(&path) {
+            open_file("/", &path, flags, FileType::Regular)
+        } else if fd == AT_FD_CWD {
+            let work_path = process.inner_exclusive_access().work_path.to_string();
+            open_file(&work_path, &path, flags, FileType::Regular)
+        } else {
+            ////相对于fd的相对路径
+            let inner = process.inner_exclusive_access();
+            let fd_usize = fd as usize;
+            if fd_usize >= inner.fd_table.len() {
+                return -EPERM;
             }
-            _ => return -EPERM,
-        }
-    } {
-        None => -ENOENT,
-        Some(os_inode) => {
-            //alloc fd and push into fd table
-            let mut inner = process.inner_exclusive_access();
-            let ret_fd = inner.alloc_fd();
-            inner.fd_table[ret_fd] = Some(FileDescriptor::Regular(os_inode));
-            assert!(inner.fd_table[ret_fd].is_some());
-            ret_fd as isize
+            let res = inner.fd_table[fd_usize].clone();
+            drop(inner);
+            match res {
+                Some(FileDescriptor::Regular(os_inode)) => {
+                    if flags.contains(OpenFlags::CREATE) {
+                        os_inode.create(&path, FileType::Regular)
+                    } else {
+                        os_inode.find(&path, flags)
+                    }
+                }
+                _ => return -EPERM,
+            }
+        } {
+            None => -ENOENT,
+            Some(os_inode) => {
+                //alloc fd and push into fd table
+                let mut inner = process.inner_exclusive_access();
+                let ret_fd = inner.alloc_fd();
+                inner.fd_table[ret_fd] = Some(FileDescriptor::Regular(os_inode));
+                assert!(inner.fd_table[ret_fd].is_some());
+                ret_fd as isize
+            }
         }
     }
 }
@@ -235,7 +245,7 @@ fn getdents64_inner(file: Arc<OSInode>, user_buf: &mut UserBuffer, len: usize) -
     let mut offset = file.get_offset();
     let dirent_size = core::mem::size_of::<Dirent>();
     let mut total_read = 0;
-    
+
     while let Some((mut name, new_offset, first_clu, attr)) = file.dirent_info(offset) {
         name.push('\0');
         let size = dirent_size + name.len();
@@ -265,7 +275,7 @@ fn getdents64_inner(file: Arc<OSInode>, user_buf: &mut UserBuffer, len: usize) -
             user_buf.write_at(total_read, vec![0u8; pad_size].as_slice());
             total_read += pad_size;
         }
-        
+    
         offset = new_offset as usize;
     }
     file.set_offset(offset);
@@ -871,4 +881,133 @@ pub fn sys_faccessat(dir_fd: isize, path: *const u8, _mode: usize, flags: usize)
         Some(_) => 0,
         _ => -ENOENT,
     }
+}
+
+pub fn sys_pselect(
+    nfds: i64,
+    rfds: *mut FdSet,
+    wfds: *mut FdSet,
+    efds: *mut FdSet,
+    timeout: *mut TimeSpec,
+) -> isize {
+    let token = current_user_token();
+    let timeout = translated_refmut(token, timeout);
+    let mut ret = 0usize;
+    
+    if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
+        let pcb = current_process();
+        let inner = pcb.inner_exclusive_access();
+        
+        if rfds as usize != 0 {
+            let read_fds = translated_refmut(token, rfds);
+            
+            //read fd set
+            for i in 0..nfds as usize {
+                if read_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.read_blocked() {
+                            read_fds.set_bit(i, false);
+                            continue;
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if wfds as usize != 0 {
+            let write_fds = translated_refmut(token, wfds);
+            
+            //write fd set
+            for i in 0..nfds as usize {
+                if write_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.write_blocked() {
+                            write_fds.set_bit(i, false);
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if efds as usize != 0 {
+            let err_fds = translated_refmut(token, efds);
+            err_fds.clear();
+        }
+    } else {
+        let clone_fd = |fd: *mut FdSet| {
+            if fd as usize != 0 {
+                FdSet::clone(translated_refmut(token, fd))
+            } else {
+                FdSet(0)
+            }
+        };
+        
+        let rfd_clone = clone_fd(rfds);
+        let wfd_clone = clone_fd(wfds);
+        let errfd_clone = clone_fd(efds);
+        
+        loop {
+            let pcb = current_process();
+            let inner = pcb.inner_exclusive_access();
+            let mut ret = 0usize;
+            
+            //handle rfd
+            if rfd_clone.0 != 0 {
+                let read_fds = translated_refmut(token, rfds);
+                
+                for i in 0..nfds as usize {
+                    if rfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.readable() {
+                                return -1;
+                            }
+                            
+                            if fd.read_blocked() {
+                                read_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            read_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            //handle wfd
+            if wfd_clone.0 != 0 {
+                let write_fds = translated_refmut(token, wfds);
+                
+                for i in 0..nfds as usize {
+                    if wfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.writable() {
+                                return -1;
+                            }
+                            
+                            if fd.write_blocked() {
+                                write_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            write_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            if ret == 0 {
+                drop(inner);
+                drop(pcb);
+                suspend_current_and_run_next();
+            } else {
+                break;
+            }
+        }
+    }
+    
+    ret as isize
 }

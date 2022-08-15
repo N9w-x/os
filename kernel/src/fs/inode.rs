@@ -457,20 +457,20 @@ pub fn init_rootfs() {
         FileType::Dir,
     )
         .unwrap();
-    let _null = open_file(
-        "/dev",
-        "null",
-        OpenFlags::CREATE | OpenFlags::DIRECTORY,
-        FileType::Dir,
-    )
-        .unwrap();
-    let zero = open_file(
-        "/dev",
-        "zero",
-        OpenFlags::CREATE | OpenFlags::RDONLY,
-        FileType::Regular,
-    )
-        .unwrap();
+    /*    let _null = open_file(
+            "/dev",
+            "null",
+            OpenFlags::CREATE | OpenFlags::DIRECTORY,
+            FileType::Dir,
+        )
+            .unwrap();*/
+    /*    let zero = open_file(
+            "/dev",
+            "zero",
+            OpenFlags::CREATE | OpenFlags::RDONLY,
+            FileType::Regular,
+        )
+            .unwrap();*/
     let _invalid = open_file(
         "/dev/null",
         "invalid",
@@ -478,16 +478,16 @@ pub fn init_rootfs() {
         FileType::Regular,
     )
         .unwrap();
-    let _invalid = open_file(
-        "/dev",
-        "rtc",
-        OpenFlags::CREATE | OpenFlags::RDONLY,
-        FileType::Regular,
-    )
-        .unwrap();
-    let mut buf = vec![0u8; 1];
-    let zero_write = UserBuffer::new(vec![unsafe {
-        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
-    }]);
-    zero.write(zero_write);
+    /*    let _invalid = open_file(
+            "/dev",
+            "rtc",
+            OpenFlags::CREATE | OpenFlags::RDONLY,
+            FileType::Regular,
+        )
+            .unwrap();*/
+    /*    let mut buf = vec![0u8; 1];
+        let zero_write = UserBuffer::new(vec![unsafe {
+            core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
+        }]);
+        zero.write(zero_write);*/
 }
