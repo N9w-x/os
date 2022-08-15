@@ -25,7 +25,7 @@ impl Dirent {
             //d_name: [0; 128],
         }
     }
-    
+
     pub fn new(inode_id: u64, offset: i64, dirent_len: u16, d_type: u8) -> Self {
         Self {
             d_ino: inode_id,
@@ -200,3 +200,29 @@ pub const POLLHUP: i16 = 0x010; /* Hang up (output only) */
 pub const POLLNVAL: i16 = 0x020; /* Invalid request: fd not open (output only) */
 pub const POLLRDNORM: i16 = 0x040; /* Equivalent to POLLIN */
 pub const POLLRDBAND: i16 = 0x080; /* Priority band data can be read (generally unused on Linux) */
+
+#[derive(Clone)]
+pub struct FdSet(pub u128);
+
+impl FdSet {
+    pub fn len() -> usize {
+        128
+    }
+    
+    pub fn get_bit(&self, index: usize) -> bool {
+        (self.0 & 1 << index) != 0
+    }
+    
+    pub fn set_bit(&mut self, index: usize, val: bool) {
+        let mask = 1 << index;
+        if val {
+            self.0 |= mask
+        } else {
+            self.0 &= !(mask)
+        };
+    }
+    
+    pub fn clear(&mut self) {
+        self.0 = 0
+    }
+}

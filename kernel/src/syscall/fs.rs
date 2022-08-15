@@ -1011,3 +1011,261 @@ pub fn sys_pselect(
     
     ret as isize
 }
+
+pub fn sys_pselect(
+    nfds: i64,
+    rfds: *mut FdSet,
+    wfds: *mut FdSet,
+    efds: *mut FdSet,
+    timeout: *mut TimeSpec,
+) -> isize {
+    let token = current_user_token();
+    let timeout = translated_refmut(token, timeout);
+    let mut ret = 0usize;
+    
+    if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
+        let pcb = current_process();
+        let inner = pcb.inner_exclusive_access();
+        
+        if rfds as usize != 0 {
+            let read_fds = translated_refmut(token, rfds);
+            
+            //read fd set
+            for i in 0..nfds as usize {
+                if read_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.read_blocked() {
+                            read_fds.set_bit(i, false);
+                            continue;
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if wfds as usize != 0 {
+            let write_fds = translated_refmut(token, wfds);
+            
+            //write fd set
+            for i in 0..nfds as usize {
+                if write_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.write_blocked() {
+                            write_fds.set_bit(i, false);
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if efds as usize != 0 {
+            let err_fds = translated_refmut(token, efds);
+            err_fds.clear();
+        }
+    } else {
+        let clone_fd = |fd: *mut FdSet| {
+            if fd as usize != 0 {
+                FdSet::clone(translated_refmut(token, fd))
+            } else {
+                FdSet(0)
+            }
+        };
+        
+        let rfd_clone = clone_fd(rfds);
+        let wfd_clone = clone_fd(wfds);
+        let errfd_clone = clone_fd(efds);
+        
+        loop {
+            let pcb = current_process();
+            let inner = pcb.inner_exclusive_access();
+            let mut ret = 0usize;
+            
+            //handle rfd
+            if rfd_clone.0 != 0 {
+                let read_fds = translated_refmut(token, rfds);
+                
+                for i in 0..nfds as usize {
+                    if rfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.readable() {
+                                return -1;
+                            }
+                            
+                            if fd.read_blocked() {
+                                read_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            read_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            //handle wfd
+            if wfd_clone.0 != 0 {
+                let write_fds = translated_refmut(token, wfds);
+                
+                for i in 0..nfds as usize {
+                    if wfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.writable() {
+                                return -1;
+                            }
+                            
+                            if fd.write_blocked() {
+                                write_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            write_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            if ret == 0 {
+                drop(inner);
+                drop(pcb);
+                suspend_current_and_run_next();
+            } else {
+                break;
+            }
+        }
+    }
+    
+    ret as isize
+}
+
+pub fn sys_pselect(
+    nfds: i64,
+    rfds: *mut FdSet,
+    wfds: *mut FdSet,
+    efds: *mut FdSet,
+    timeout: *mut TimeSpec,
+) -> isize {
+    let token = current_user_token();
+    let timeout = translated_refmut(token, timeout);
+    let mut ret = 0usize;
+    
+    if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
+        let pcb = current_process();
+        let inner = pcb.inner_exclusive_access();
+        
+        if rfds as usize != 0 {
+            let read_fds = translated_refmut(token, rfds);
+            
+            //read fd set
+            for i in 0..nfds as usize {
+                if read_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.read_blocked() {
+                            read_fds.set_bit(i, false);
+                            continue;
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if wfds as usize != 0 {
+            let write_fds = translated_refmut(token, wfds);
+            
+            //write fd set
+            for i in 0..nfds as usize {
+                if write_fds.get_bit(i) {
+                    if let Some(fd) = &inner.fd_table[i] {
+                        if fd.write_blocked() {
+                            write_fds.set_bit(i, false);
+                        }
+                        ret += 1;
+                    }
+                }
+            }
+        }
+        
+        if efds as usize != 0 {
+            let err_fds = translated_refmut(token, efds);
+            err_fds.clear();
+        }
+    } else {
+        let clone_fd = |fd: *mut FdSet| {
+            if fd as usize != 0 {
+                FdSet::clone(translated_refmut(token, fd))
+            } else {
+                FdSet(0)
+            }
+        };
+        
+        let rfd_clone = clone_fd(rfds);
+        let wfd_clone = clone_fd(wfds);
+        let errfd_clone = clone_fd(efds);
+        
+        loop {
+            let pcb = current_process();
+            let inner = pcb.inner_exclusive_access();
+            let mut ret = 0usize;
+            
+            //handle rfd
+            if rfd_clone.0 != 0 {
+                let read_fds = translated_refmut(token, rfds);
+                
+                for i in 0..nfds as usize {
+                    if rfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.readable() {
+                                return -1;
+                            }
+                            
+                            if fd.read_blocked() {
+                                read_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            read_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            //handle wfd
+            if wfd_clone.0 != 0 {
+                let write_fds = translated_refmut(token, wfds);
+                
+                for i in 0..nfds as usize {
+                    if wfd_clone.get_bit(i) {
+                        if let Some(fd) = &inner.fd_table[i] {
+                            if !fd.writable() {
+                                return -1;
+                            }
+                            
+                            if fd.write_blocked() {
+                                write_fds.set_bit(i, false);
+                                continue;
+                            }
+                            
+                            write_fds.set_bit(i, true);
+                            ret += 1;
+                        }
+                    }
+                }
+            }
+            
+            if ret == 0 {
+                drop(inner);
+                drop(pcb);
+                suspend_current_and_run_next();
+            } else {
+                break;
+            }
+        }
+    }
+    
+    ret as isize
+}

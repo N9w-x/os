@@ -94,6 +94,7 @@ const SYSCALL_GET_UID: usize = 174;
 const SYSCALL_SYSINFO: usize = 179;
 const SYSCALL_SEND_FILE: usize = 71;
 const SYSCALL_FACCESSAT: usize = 48;
+const SYSCALL_PSELECT: usize = 72;
 
 const_def!(SYSCALL_EXIT_GROUP, 94);
 const_def!(SYSCALL_GET_TID, 178);
@@ -117,7 +118,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //         args
     //     );
     // }
-    
+
     let ret = match syscall_id {
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
@@ -248,6 +249,13 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_SYSINFO => sys_sysinfo(args[0] as _),
         SYSCALL_SEND_FILE => sys_sendfile(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         SYSCALL_FACCESSAT => sys_faccessat(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
+        SYSCALL_PSELECT => sys_pselect(
+            args[0] as _,
+            args[1] as _,
+            args[2] as _,
+            args[3] as _,
+            args[4] as _,
+        ),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
