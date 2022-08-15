@@ -235,28 +235,38 @@ fn getdents64_inner(file: Arc<OSInode>, user_buf: &mut UserBuffer, len: usize) -
     let mut offset = file.get_offset();
     let dirent_size = core::mem::size_of::<Dirent>();
     let mut total_read = 0;
-    loop {
-        if let Some((mut name, new_offset, first_clu, attr)) = file.dirent_info(offset) {
-            name.push('\0');
-            let size = dirent_size + name.len();
-            if total_read + size > len {
-                break;
-            }
-            let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
-                DTYPE_REG
-            } else if attr & ATTRIBUTE_DIRECTORY != 0 {
-                DTYPE_DIR
-            } else {
-                DTYPE_UNKNOWN
-            };
-            let dirent = Dirent::new(first_clu as u64, new_offset as i64, size as u16, d_type);
-            user_buf.write_at(total_read, dirent.as_bytes());
-            user_buf.write_at(total_read + dirent_size, name.as_bytes());
-            total_read += size;
-            offset = new_offset as usize;
-        } else {
+    
+    while let Some((mut name, new_offset, first_clu, attr)) = file.dirent_info(offset) {
+        name.push('\0');
+        let size = dirent_size + name.len();
+        //for k210 aligned
+        let pad_size = ((size + 7) / 8) * 8 - size;
+        if total_read + size + pad_size > len {
             break;
         }
+        let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
+            DTYPE_REG
+        } else if attr & ATTRIBUTE_DIRECTORY != 0 {
+            DTYPE_DIR
+        } else {
+            DTYPE_UNKNOWN
+        };
+        let dirent = Dirent::new(
+            first_clu as u64,
+            new_offset as i64,
+            (size + pad_size) as u16,
+            d_type,
+        );
+        user_buf.write_at(total_read, dirent.as_bytes());
+        user_buf.write_at(total_read + dirent_size, name.as_bytes());
+        total_read += size;
+        if pad_size != 0 {
+            //pad zero to align to 8 bytes
+            user_buf.write_at(total_read, vec![0u8; pad_size].as_slice());
+            total_read += pad_size;
+        }
+        
+        offset = new_offset as usize;
     }
     file.set_offset(offset);
     total_read as isize
