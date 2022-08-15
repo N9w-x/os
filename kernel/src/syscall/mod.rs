@@ -87,6 +87,8 @@ const SYSCALL_PPOLL: usize = 73;
 const SYSCALL_SETPGID: usize = 154;
 const SYSCALL_GETPGID: usize = 155;
 const SYSCALL_GETEUID: usize = 175;
+const SYSCALL_READLINKAT: usize = 78;
+const SYSCALL_GETRUSAGE: usize = 165;
 
 // first to support
 const SYSCALL_MPROTECT: usize = 226;
@@ -248,6 +250,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_SYSINFO => sys_sysinfo(args[0] as _),
         SYSCALL_SEND_FILE => sys_sendfile(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         SYSCALL_FACCESSAT => sys_faccessat(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
+        SYSCALL_READLINKAT => sys_readlinkat(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
+        SYSCALL_GETRUSAGE => sys_getrusage(args[0] as _, args[1] as _),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
         501 | 65535 => shutdown(),
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),

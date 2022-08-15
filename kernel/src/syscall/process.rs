@@ -21,7 +21,7 @@ use crate::task::{
     add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
     pid2process, suspend_current_and_run_next, tid2task, ClearChildTid, CloneFlag, ITimerVal,
     SigAction, SigInfo, Signum, TimeSpec, UContext, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK,
-    SIG_SETMASK, SIG_UNBLOCK, SIG_DFL, current_trap_cx,
+    SIG_SETMASK, SIG_UNBLOCK, SIG_DFL, current_trap_cx, TimeVal,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 use alloc::slice;
@@ -779,5 +779,29 @@ pub fn sys_getpgid(pid: usize) -> isize {
 }
 
 pub fn sys_geteuid() -> isize {
+    0
+}
+
+#[repr(C)]
+pub struct RUsage{
+    ru_utime   :TimeVal,     /* user CPU time used */
+    ru_stime   :TimeVal,     /* system CPU time used */
+    ru_maxrss  :isize  ,     /* maximum resident set size */
+    ru_ixrss   :isize  ,     /* integral shared memory size */
+    ru_idrss   :isize  ,     /* integral unshared data size */
+    ru_isrss   :isize  ,     /* integral unshared stack size */
+    ru_minflt  :isize  ,     /* page reclaims (soft page faults) */
+    ru_majflt  :isize  ,     /* page faults (hard page faults) */
+    ru_nswap   :isize  ,     /* swaps */
+    ru_inblock :isize  ,     /* block input operations */
+    ru_oublock :isize  ,     /* block output operations */
+    ru_msgsnd  :isize  ,     /* IPC messages sent */
+    ru_msgrcv  :isize  ,     /* IPC messages received */
+    ru_nsignals:isize  ,     /* signals received */
+    ru_nvcsw   :isize  ,     /* voluntary context switches */
+    ru_nivcsw  :isize  ,     /* involuntary context switches */
+}
+
+pub fn sys_getrusage(who: isize, usage: *mut RUsage) -> isize {
     0
 }
