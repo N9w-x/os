@@ -4,7 +4,7 @@ use _core::mem::size_of;
 
 use bitflags::*;
 
-use crate::{config::SIGRETURN_TRAMPOLINE, mm::{translated_byte_buffer, UserBuffer}, task::{current_process, current_task, suspend_current_and_run_next}};
+use crate::{config::SIGRETURN_TRAMPOLINE, mm::{translated_byte_buffer, UserBuffer, translated_refmut}, task::{current_process, current_task, suspend_current_and_run_next}};
 
 use super::current_user_token;
 
@@ -361,22 +361,13 @@ pub fn call_user_signal_handler(signum: usize) {
                 trap_cx.x[1] = __sigreturn as usize - __alltraps as usize + SIGRETURN_TRAMPOLINE;
                 trap_cx.x[10] = signum;
                 if sa_flags.contains(SaFlags::SA_SIGINFO) {
+                    let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
                     trap_cx.x[2] -= size_of::<UContext>();
                     trap_cx.x[12] = trap_cx.x[2];
-                    let mut userbuf = UserBuffer::new(translated_byte_buffer(
-                        token,
-                        trap_cx.x[2] as *const u8,
-                        size_of::<UContext>()),
-                    );
-                    let mut ucontext = UContext::new();
-                    *ucontext.mc_pc() = trap_cx.sepc;
-                    userbuf.write(ucontext.as_bytes());
+                    *translated_refmut(token, mc_pc_ptr as *mut u64) = trap_cx.sepc as u64;
                 }
-    
-                drop(task_inner);
                 // println!("[signal] tid: {} handler: {:#X}, signum: {}, old_pc: {:#X}, new_pc: {:#X}", task.gettid(), handler, signum, trap_cx.sepc, handler);
-    
-                trap_cx.sepc = handler as usize;
+                trap_cx.sepc = handler;
             }
         }
     }

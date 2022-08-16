@@ -210,7 +210,7 @@ impl FdSet {
     }
     
     pub fn get_bit(&self, index: usize) -> bool {
-        (self.0 & 1 << index) != 0
+        (self.0 & (1 << index)) != 0
     }
     
     pub fn set_bit(&mut self, index: usize, val: bool) {

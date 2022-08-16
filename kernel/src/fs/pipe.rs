@@ -5,26 +5,29 @@ use spin::Mutex;
 use crate::mm::UserBuffer;
 use crate::task::suspend_current_and_run_next;
 
-use super::File;
+use super::{File, OpenFlags};
 
 pub struct Pipe {
     readable: bool,
     writable: bool,
+    nonblock: bool,
     buffer: Arc<Mutex<PipeRingBuffer>>,
 }
 
 impl Pipe {
-    pub fn read_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>) -> Self {
+    pub fn read_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>, nonblock: bool) -> Self {
         Self {
             readable: true,
             writable: false,
+            nonblock,
             buffer,
         }
     }
-    pub fn write_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>) -> Self {
+    pub fn write_end_with_buffer(buffer: Arc<Mutex<PipeRingBuffer>>, nonblock: bool) -> Self {
         Self {
             readable: false,
             writable: true,
+            nonblock,
             buffer,
         }
     }
@@ -44,6 +47,7 @@ pub struct PipeRingBuffer {
     head: usize,
     tail: usize,
     status: RingBufferStatus,
+    read_end: Option<Weak<Pipe>>,
     write_end: Option<Weak<Pipe>>,
 }
 
@@ -54,10 +58,13 @@ impl PipeRingBuffer {
             head: 0,
             tail: 0,
             status: RingBufferStatus::Empty,
+            read_end: None,
             write_end: None,
         }
     }
-
+    pub fn set_read_end(&mut self, read_end: &Arc<Pipe>) {
+        self.read_end = Some(Arc::downgrade(read_end));
+    }
     pub fn set_write_end(&mut self, write_end: &Arc<Pipe>) {
         self.write_end = Some(Arc::downgrade(write_end));
     }
@@ -98,7 +105,9 @@ impl PipeRingBuffer {
             RING_BUFFER_SIZE - self.available_read()
         }
     }
-    
+    pub fn all_read_ends_closed(&self) -> bool {
+        self.read_end.as_ref().unwrap().upgrade().is_none()
+    }
     pub fn all_write_ends_closed(&self) -> bool {
         self.write_end.as_ref().unwrap().upgrade().is_none()
     }
@@ -119,7 +128,7 @@ impl File for Pipe {
             let mut ring_buffer = self.buffer.lock();
             let loop_read = ring_buffer.available_read();
             if loop_read == 0 {
-                if ring_buffer.all_write_ends_closed() {
+                if ring_buffer.all_write_ends_closed() || self.nonblock {
                     return read_size;
                 }
                 drop(ring_buffer);
@@ -144,12 +153,19 @@ impl File for Pipe {
     
     fn write(&self, buf: UserBuffer) -> usize {
         assert!(self.writable());
+        println!("write");
         let mut buf_iter = buf.into_iter();
         let mut write_size = 0usize;
         loop {
             let mut ring_buffer = self.buffer.lock();
+            if ring_buffer.all_read_ends_closed() {
+                return write_size;
+            }
             let loop_write = ring_buffer.available_write();
             if loop_write == 0 {
+                if self.nonblock {
+                    return write_size;
+                }
                 drop(ring_buffer);
                 suspend_current_and_run_next();
                 continue;
@@ -165,13 +181,36 @@ impl File for Pipe {
             }
         }
     }
+    fn read_blocked(&self) -> bool {
+        if self.readable() {
+            if self.nonblock {
+                return false;
+            } else {
+                // println!("[rblk] ret: {}", self.buffer.lock().available_read() == 0);
+                return self.buffer.lock().available_read() == 0;
+            }
+        }
+        false
+    }
+    fn write_blocked(&self) -> bool {
+        if self.writable() {
+            if self.nonblock {
+                return false;
+            } else {
+                return self.buffer.lock().available_write() == 0;
+            }
+        }
+        false
+    }
 }
 
 /// Return (read_end, write_end)
-pub fn make_pipe() -> (Arc<Pipe>, Arc<Pipe>) {
+pub fn make_pipe(flags: OpenFlags) -> (Arc<Pipe>, Arc<Pipe>) {
     let buffer = Arc::new(Mutex::new(PipeRingBuffer::new()));
-    let read_end = Arc::new(Pipe::read_end_with_buffer(buffer.clone()));
-    let write_end = Arc::new(Pipe::write_end_with_buffer(buffer.clone()));
+    let nonblock = flags.contains(OpenFlags::NONBLOCK);
+    let read_end = Arc::new(Pipe::read_end_with_buffer(buffer.clone(), nonblock));
+    let write_end = Arc::new(Pipe::write_end_with_buffer(buffer.clone(), nonblock));
+    buffer.lock().set_read_end(&read_end);
     buffer.lock().set_write_end(&write_end);
     (read_end, write_end)
 }

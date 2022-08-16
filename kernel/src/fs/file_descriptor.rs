@@ -3,6 +3,8 @@ use alloc::sync::Arc;
 use crate::fs::{File, OSInode};
 use crate::mm::UserBuffer;
 
+use super::inode;
+
 #[derive(Clone)]
 pub enum FileDescriptor {
     Regular(Arc<OSInode>),
@@ -38,6 +40,18 @@ impl File for FileDescriptor {
         match self {
             FileDescriptor::Regular(inode) => inode.ioctl(cmd),
             FileDescriptor::Abstract(inode) => inode.ioctl(cmd),
+        }
+    }
+    fn read_blocked(&self) -> bool {
+        match self {
+            FileDescriptor::Regular(inode) => inode.read_blocked(),
+            FileDescriptor::Abstract(inode) => inode.read_blocked(),
+        }
+    }
+    fn write_blocked(&self) -> bool {
+        match self {
+            FileDescriptor::Regular(inode) => inode.write_blocked(),
+            FileDescriptor::Abstract(inode) => inode.write_blocked(),
         }
     }
 }

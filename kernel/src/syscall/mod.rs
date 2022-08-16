@@ -12,7 +12,7 @@ use utils::*;
 use crate::console::{ERROR, INFO};
 use crate::const_def;
 use crate::sbi::shutdown;
-use crate::task::TimeSpec;
+use crate::task::{TimeSpec, current_process};
 
 const SYSCALL_LINK_AT: usize = 37;
 const SYSCALL_UNLINK_AT: usize = 35;
@@ -113,11 +113,12 @@ mod thread;
 mod utils;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
-    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV].contains(&syscall_id) {
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
     //     println!(
-    //         "{} args:{:x?}",
+    //         "{} args:{:x?} pid: {}, [",
     //         color!(format!("syscall id: {}", syscall_id), INFO),
-    //         args
+    //         args,
+    //         current_process().getpid(),
     //     );
     // }
 
@@ -126,7 +127,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
         SYSCALL_OPEN => sys_open(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),
-        SYSCALL_PIPE => sys_pipe(args[0] as *mut u32),
+        SYSCALL_PIPE => sys_pipe(args[0] as *mut u32, args[1] as _),
         SYSCALL_READ => sys_read(args[0], args[1] as *const u8, args[2]),
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
@@ -273,5 +274,15 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //    println!("syscall_id: {}, args: {:x?} ,ret={}", syscall_id, args, ret);
     //}
     
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
+    //     println!(
+    //         "{} args:{:x?}, pid: {} ret: {} ]",
+    //         color!(format!("syscall id: {}", syscall_id), INFO),
+    //         args,
+    //         current_process().getpid(),
+    //         ret
+    //     );
+    // }
+
     ret
 }

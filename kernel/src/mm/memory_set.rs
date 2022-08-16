@@ -469,6 +469,7 @@ impl MemorySet {
         let mut memory_set = Self::new_bare();
         // trampoline, trap context, user stack 不能 CoW
         // map trampoline
+        memory_set.map_sigreturn_trampoline();
         memory_set.map_trampoline();
         for area in user_space.areas.iter() {
             // code segment, data segment 之后 CoW
