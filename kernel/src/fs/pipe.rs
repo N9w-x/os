@@ -68,7 +68,7 @@ impl PipeRingBuffer {
     pub fn set_write_end(&mut self, write_end: &Arc<Pipe>) {
         self.write_end = Some(Arc::downgrade(write_end));
     }
-    
+
     pub fn write_byte(&mut self, byte: u8) {
         self.status = RingBufferStatus::Normal;
         self.arr[self.tail] = byte;
@@ -77,7 +77,7 @@ impl PipeRingBuffer {
             self.status = RingBufferStatus::Full;
         }
     }
-    
+
     pub fn read_byte(&mut self) -> u8 {
         self.status = RingBufferStatus::Normal;
         let c = self.arr[self.head];
@@ -87,7 +87,7 @@ impl PipeRingBuffer {
         }
         c
     }
-    
+
     pub fn available_read(&self) -> usize {
         if self.status == RingBufferStatus::Empty {
             0
@@ -148,6 +148,7 @@ impl File for Pipe {
                     return read_size;
                 }
             }
+            return read_size;
         }
     }
     
@@ -183,22 +184,22 @@ impl File for Pipe {
     }
     fn read_blocked(&self) -> bool {
         if self.readable() {
-            if self.nonblock {
-                return false;
+            return if self.nonblock {
+                false
             } else {
                 // println!("[rblk] ret: {}", self.buffer.lock().available_read() == 0);
-                return self.buffer.lock().available_read() == 0;
-            }
+                self.buffer.lock().available_read() == 0
+            };
         }
         false
     }
     fn write_blocked(&self) -> bool {
         if self.writable() {
-            if self.nonblock {
-                return false;
+            return if self.nonblock {
+                false
             } else {
-                return self.buffer.lock().available_write() == 0;
-            }
+                self.buffer.lock().available_write() == 0
+            };
         }
         false
     }
