@@ -1,7 +1,6 @@
-use core::slice::from_raw_parts;
-
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use core::slice::from_raw_parts;
 
 use lazy_static::*;
 
@@ -40,9 +39,17 @@ mod switch;
 mod task;
 mod timer;
 
-pub fn suspend_current_and_run_next() {
+pub fn suspend_current_and_run_next() -> isize {
     // There must be an application running.
     let task = take_current_task().unwrap();
+    if task
+        .inner_exclusive_access()
+        .signals
+        .contains(Signum::SIGKILL)
+    {
+        drop(task);
+        return -1;
+    }
     
     // ---- access current TCB exclusively
     let mut task_inner = task.inner_exclusive_access();
@@ -56,6 +63,7 @@ pub fn suspend_current_and_run_next() {
     add_task(task);
     // jump to scheduling cycle
     schedule(task_cx_ptr);
+    0
 }
 
 /// This function must be followed by a schedule

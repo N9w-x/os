@@ -26,7 +26,7 @@ pub fn sys_sleep(time_req: *const u64, time_remain: *mut u64) -> isize {
         if is_end(end_time) {
             break;
         } else {
-            suspend_current_and_run_next()
+            suspend_current_and_run_next();
         }
     }
     
