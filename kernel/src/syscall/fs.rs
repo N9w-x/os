@@ -21,11 +21,11 @@ use crate::mm::{
 };
 use crate::task::{
     current_process, current_task, current_user_token, Signum, suspend_current_and_run_next,
-    TimeSpec, UTIME_NOW, UTIME_OMIT,
+    TimeSpec, UTIME_NOW, UTIME_OMIT, CloneFlag,
 };
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
-use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE};
+use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE, EINVAL};
 
 const AT_FD_CWD: isize = -100;
 
@@ -34,11 +34,11 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let process = current_process();
     let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
-        return -1;
+        return -EBADF;
     }
     if let Some(file) = &inner.fd_table[fd] {
         if !file.writable() {
-            return -1;
+            return -EINVAL;
         }
         let file = file.clone();
         // release current task TCB manually to avoid multi-borrow
@@ -134,11 +134,12 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
-pub fn sys_pipe(pipe: *mut u32) -> isize {
+pub fn sys_pipe(pipe: *mut u32, flags: u32) -> isize {
+    let flags = OpenFlags::from_bits(flags).unwrap();
     let process = current_process();
     let token = current_user_token();
     let mut inner = process.inner_exclusive_access();
-    let (pipe_read, pipe_write) = make_pipe();
+    let (pipe_read, pipe_write) = make_pipe(flags);
     let read_fd = inner.alloc_fd();
     inner.fd_table[read_fd] = Some(FileDescriptor::Abstract(pipe_read));
     let write_fd = inner.alloc_fd();
@@ -910,6 +911,7 @@ pub fn sys_pselect(
                             continue;
                         }
                         ret += 1;
+                        // println!("pid: {}, ret: {}, nt r", pcb.getpid(), ret);
                     }
                 }
             }
@@ -926,6 +928,7 @@ pub fn sys_pselect(
                             write_fds.set_bit(i, false);
                         }
                         ret += 1;
+                        // println!("pid: {}, ret: {}, nt w", pcb.getpid(), ret);
                     }
                 }
             }
@@ -946,7 +949,10 @@ pub fn sys_pselect(
         
         let rfd_clone = clone_fd(rfds);
         let wfd_clone = clone_fd(wfds);
-        let errfd_clone = clone_fd(efds);
+        // let errfd_clone = clone_fd(efds);
+        if efds as usize != 0 {
+            translated_refmut(token, efds).clear();
+        }
         
         loop {
             let pcb = current_process();
@@ -971,6 +977,7 @@ pub fn sys_pselect(
     
                             read_fds.set_bit(i, true);
                             ret += 1;
+                            // println!("pid: {}, ret: {}, t r", pcb.getpid(), ret);
                         }
                     }
                 }
@@ -994,6 +1001,7 @@ pub fn sys_pselect(
     
                             write_fds.set_bit(i, true);
                             ret += 1;
+                            // println!("pid: {}, ret: {}, t w", pcb.getpid(), ret);
                         }
                     }
                 }
@@ -1004,7 +1012,8 @@ pub fn sys_pselect(
                 drop(pcb);
                 suspend_current_and_run_next();
             } else {
-                break;
+                return ret as isize;
+                // break;
             }
         }
     }

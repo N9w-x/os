@@ -244,6 +244,8 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         // println!("[debug] after exec:");
         // crate::mm::frame_get_rest();
         process.kmunmap(elf_buf, len);
+        // println!("[debug] after kmunmap:");
+        // crate::mm::frame_get_rest();
         process.inner_exclusive_access().fd_table[fd] = None;
         0
     } else {
@@ -633,9 +635,12 @@ pub fn sys_sigreturn() -> isize {
     // 将备份的trap上下文恢复
     let trap_cx = task_inner.get_trap_cx();
     let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
-    let mc_pc = *translated_ref(token, mc_pc_ptr as *mut u64) as usize;
-    *trap_cx = task_inner.trap_ctx_backup.unwrap();
-    trap_cx.sepc = mc_pc;
+    
+    *trap_cx = task_inner.trap_ctx_backup.take().unwrap();
+
+    // TODO: SIGINFO
+    // let mc_pc = *translated_ref(token, mc_pc_ptr as *mut u64) as usize;
+    // trap_cx.sepc = mc_pc;
 
     // println!("[sigreturn] tid: {}, new_pc: {:#X}", tid, trap_cx.sepc);
 
