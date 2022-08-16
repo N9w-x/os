@@ -11,6 +11,7 @@ use spin::Mutex;
 use crate::drivers::BLOCK_DEVICE;
 use crate::fs::{File, get_current_inode};
 use crate::fs::fs_info::{Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, Kstat, VFSFlag};
+use crate::fs::fs_tree::{get_abs_path, insert_vfile, search_vfile};
 use crate::mm::UserBuffer;
 use crate::timer::get_time_us;
 
@@ -133,15 +134,15 @@ impl OSInode {
     pub fn modification_time(&self) -> u64 {
         self.inner.lock().mtime
     }
-    
+
     pub fn set_accessed_time(&self, atime: u64) {
         self.inner.lock().atime = atime;
     }
-    
+
     pub fn accessed_time(&self) -> u64 {
         self.inner.lock().atime
     }
-    
+
     //在当前目录下创建文件
     pub fn create(&self, path: &str, _type: FileType) -> Option<Arc<OSInode>> {
         let inode = self.inner.lock().inode.clone();
@@ -155,7 +156,7 @@ impl OSInode {
             target_inode.remove();
         }
         let filename = path_split.pop().unwrap();
-        
+
         //创建失败的条件包括: 目录不存在,存在文件但不是目录
         match inode.find_vfile_bypath(&path_split) {
             None => None,
@@ -171,17 +172,17 @@ impl OSInode {
             }
         }
     }
-    
+
     pub fn find(&self, path: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
         let inner = self.inner.lock();
         let path_split = path.split('/').collect();
-        
+
         inner.inode.find_vfile_bypath(&path_split).map(|inode| {
             let (readable, writable) = flags.read_write();
             Arc::new(OSInode::new(readable, writable, inode.clone()))
         })
     }
-    
+
     pub fn get_dirent(&self, dirent: &mut Dirent, offset: usize) -> isize {
         let mut inner = self.inner.lock();
         if let Some((mut name, offset, first_clu, attr)) =
@@ -195,7 +196,7 @@ impl OSInode {
             } else {
                 DTYPE_UNKNOWN
             };
-            
+    
             dirent.fill_info(
                 &name,
                 first_clu as u64,
@@ -388,8 +389,14 @@ pub fn open_file(
     flags: OpenFlags,
     _type: FileType,
 ) -> Option<Arc<OSInode>> {
-    let cur_inode = get_current_inode(work_path);
     let (readable, writable) = flags.read_write();
+    let abs_path = get_abs_path(work_path, path);
+    
+    if let Some(vfile) = search_vfile(&abs_path) {
+        return Some(Arc::new(OSInode::new(readable, writable, vfile)));
+    }
+    
+    let cur_inode = get_current_inode(work_path);
     let mut path_split: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
@@ -397,18 +404,21 @@ pub fn open_file(
         if let Some(inode) = cur_inode.find_vfile_bypath(&path_split) {
             inode.remove();
         }
-    
+        
         let filename = path_split.pop().unwrap();
         let dir = cur_inode.find_vfile_bypath(&path_split).unwrap();
         let attr = _type.into();
         //创建文件
-        dir.create(filename, attr)
-           .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
+        dir.create(filename, attr).map(|inode| {
+            insert_vfile(&abs_path, inode.clone());
+            Arc::new(OSInode::new(readable, writable, inode))
+        })
     } else {
         cur_inode.find_vfile_bypath(&path_split).map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear()
             }
+            insert_vfile(&abs_path, inode.clone());
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
@@ -458,19 +468,19 @@ pub fn init_rootfs() {
     )
         .unwrap();
     /*    let _null = open_file(
-            "/dev",
-            "null",
-            OpenFlags::CREATE | OpenFlags::DIRECTORY,
-            FileType::Dir,
-        )
-            .unwrap();*/
+        "/dev",
+        "null",
+        OpenFlags::CREATE | OpenFlags::DIRECTORY,
+        FileType::Dir,
+    )
+        .unwrap();*/
     /*    let zero = open_file(
-            "/dev",
-            "zero",
-            OpenFlags::CREATE | OpenFlags::RDONLY,
-            FileType::Regular,
-        )
-            .unwrap();*/
+        "/dev",
+        "zero",
+        OpenFlags::CREATE | OpenFlags::RDONLY,
+        FileType::Regular,
+    )
+        .unwrap();*/
     let _invalid = open_file(
         "/dev/null",
         "invalid",
@@ -479,15 +489,15 @@ pub fn init_rootfs() {
     )
         .unwrap();
     /*    let _invalid = open_file(
-            "/dev",
-            "rtc",
-            OpenFlags::CREATE | OpenFlags::RDONLY,
-            FileType::Regular,
-        )
-            .unwrap();*/
+        "/dev",
+        "rtc",
+        OpenFlags::CREATE | OpenFlags::RDONLY,
+        FileType::Regular,
+    )
+        .unwrap();*/
     /*    let mut buf = vec![0u8; 1];
-        let zero_write = UserBuffer::new(vec![unsafe {
-            core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
-        }]);
-        zero.write(zero_write);*/
+    let zero_write = UserBuffer::new(vec![unsafe {
+        core::slice::from_raw_parts_mut(buf.as_mut_slice().as_mut_ptr(), 1)
+    }]);
+    zero.write(zero_write);*/
 }

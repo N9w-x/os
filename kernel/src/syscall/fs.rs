@@ -77,7 +77,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
     // println!("{}", color!(format!("[open] path:{}", path), INFO));
     //rcore-tutorial和ultra os 你们可上点心吧
     let flags = unsafe { OpenFlags::from_bits_unchecked(flags) };
-    
+
     //dev文件仅保存在内存中
     if let Some(dev_fs) = open_dev_file(&path) {
         let mut inner = process.inner_exclusive_access();
@@ -893,7 +893,7 @@ pub fn sys_pselect(
     let token = current_user_token();
     let timeout = translated_refmut(token, timeout);
     let mut ret = 0usize;
-    
+    println!("{:?}", timeout);
     if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
         let pcb = current_process();
         let inner = pcb.inner_exclusive_access();
@@ -956,19 +956,19 @@ pub fn sys_pselect(
             //handle rfd
             if rfd_clone.0 != 0 {
                 let read_fds = translated_refmut(token, rfds);
-                
+    
                 for i in 0..nfds as usize {
                     if rfd_clone.get_bit(i) {
                         if let Some(fd) = &inner.fd_table[i] {
                             if !fd.readable() {
                                 return -1;
                             }
-                            
+    
                             if fd.read_blocked() {
                                 read_fds.set_bit(i, false);
                                 continue;
                             }
-                            
+    
                             read_fds.set_bit(i, true);
                             ret += 1;
                         }
@@ -979,19 +979,19 @@ pub fn sys_pselect(
             //handle wfd
             if wfd_clone.0 != 0 {
                 let write_fds = translated_refmut(token, wfds);
-                
+    
                 for i in 0..nfds as usize {
                     if wfd_clone.get_bit(i) {
                         if let Some(fd) = &inner.fd_table[i] {
                             if !fd.writable() {
                                 return -1;
                             }
-                            
+    
                             if fd.write_blocked() {
                                 write_fds.set_bit(i, false);
                                 continue;
                             }
-                            
+    
                             write_fds.set_bit(i, true);
                             ret += 1;
                         }

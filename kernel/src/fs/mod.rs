@@ -13,11 +13,13 @@ pub use path::WorkPath;
 pub use pipe::{make_pipe, Pipe, PipeRingBuffer};
 pub use stdio::{Stdin, Stdout};
 
+use crate::fs::fs_tree::{insert_vfile, search_vfile};
 use crate::mm::UserBuffer;
 
 mod dev_fs;
 mod file_descriptor;
 mod fs_info;
+mod fs_tree;
 mod inode;
 mod io_vec;
 mod path;
@@ -44,8 +46,16 @@ pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
     if curr_path == "/" || curr_path.starts_with('/') {
         ROOT_INODE.clone()
     } else {
-        println!("{}", curr_path);
-        let path: Vec<&str> = curr_path.split('/').collect();
-        ROOT_INODE.find_vfile_bypath(&path).unwrap()
+        match search_vfile(curr_path) {
+            Some(vfile) => vfile,
+            None => {
+                let path_vec: Vec<&str> = curr_path.split('/').collect();
+                let vfile = ROOT_INODE.find_vfile_bypath(&path_vec).unwrap();
+                insert_vfile(curr_path, vfile.clone());
+                vfile
+            }
+        }
     }
 }
+
+pub fn search_inode(work_path: &str) {}
