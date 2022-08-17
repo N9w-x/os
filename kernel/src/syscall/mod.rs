@@ -260,7 +260,10 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_READLINKAT => sys_readlinkat(args[0] as _, args[1] as _, args[2] as _, args[3] as _),
         SYSCALL_GETRUSAGE => sys_getrusage(args[0] as _, args[1] as _),
         //SYSCALL_HEAP_SPACE => crate::mm::get_rest(),
-        501 | 65535 => shutdown(),
+        501 | 65535 => {
+            println!("!TEST FINISH!");
+            shutdown();
+        },
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
             let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
