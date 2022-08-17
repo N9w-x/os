@@ -154,7 +154,7 @@ pub fn trap_handler() -> ! {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
-            ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
+            // ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
             suspend_current_and_run_next();
         }
         Trap::Interrupt(Interrupt::SupervisorExternal) => {
@@ -216,7 +216,7 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();
-            ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
+            // ITIMER_MANAGER.lock().check_itimer(); // 检查定时器
             // do not schedule now
         }
         _ => {

@@ -148,8 +148,8 @@ pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
         // drop file descriptors
         process_inner.fd_table.clear();
     }
-    // 定时器停止计时
-    ITIMER_MANAGER.lock().remove_itimer(process.getpid());
+    // // 定时器停止计时
+    // ITIMER_MANAGER.lock().remove_itimer(process.getpid());
     drop(process);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();

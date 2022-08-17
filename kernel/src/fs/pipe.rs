@@ -154,7 +154,7 @@ impl File for Pipe {
     
     fn write(&self, buf: UserBuffer) -> usize {
         assert!(self.writable());
-        println!("write");
+        let buf_len = buf.len();
         let mut buf_iter = buf.into_iter();
         let mut write_size = 0usize;
         loop {
@@ -168,7 +168,9 @@ impl File for Pipe {
                     return write_size;
                 }
                 drop(ring_buffer);
-                suspend_current_and_run_next();
+                if suspend_current_and_run_next() < 0 {
+                    return write_size;
+                }
                 continue;
             }
             // write at most loop_write bytes

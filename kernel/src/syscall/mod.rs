@@ -221,9 +221,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         ),
         //SYSCALL_SYSFS => sys_fs(args[0], args[1], args[2]),
         SYSCALL_GETITIMER => sys_getitimer(args[0] as isize, args[1] as usize),
-        SYSCALL_SETITIMER => {
-            sys_setitimer(args[0] as isize, args[1] as *mut usize, args[2] as usize)
-        }
+        SYSCALL_SETITIMER => sys_setitimer(args[0] as isize, args[1] as _, args[2] as _),
         SYSCALL_CLOCK_GETTIME => sys_clock_gettime(args[0] as isize, args[1] as *mut usize),
         SYSCALL_LSEEK => sys_lseek(args[0] as isize, args[1] as isize, args[2] as i32),
         SYSCALL_FCNTL => sys_fcntl(args[0], args[1] as u32, args[2] as _),

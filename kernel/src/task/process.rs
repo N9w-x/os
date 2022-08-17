@@ -52,8 +52,6 @@ pub struct ProcessControlBlockInner {
     pub work_path: WorkPath,
     //tid attribute
     // pub tid_attr: PCBAttribute,
-    // 定时器信息
-    pub itimer: ITimerVal,
 }
 
 impl ProcessControlBlockInner {
@@ -286,7 +284,6 @@ impl ProcessControlBlock {
                     //     set_child_tid: 0,
                     //     clear_child_tid: 0,
                     // },
-                    itimer: ITimerVal::new(),
                 })
             },
         });
@@ -525,7 +522,6 @@ impl ProcessControlBlock {
                     // heap_end: parent.heap_end,
                     // mmap_area_base: parent.mmap_area_base,
                     // mmap_area_end: parent.mmap_area_end,
-                    itimer: parent.itimer.clone(),
                 })
             },
         });

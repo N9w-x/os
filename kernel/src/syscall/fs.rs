@@ -894,7 +894,6 @@ pub fn sys_pselect(
     let token = current_user_token();
     let timeout = translated_refmut(token, timeout);
     let mut ret = 0usize;
-    println!("{:?}", timeout);
     if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
         let pcb = current_process();
         let inner = pcb.inner_exclusive_access();

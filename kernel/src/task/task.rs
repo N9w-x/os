@@ -5,7 +5,7 @@ use spin::Mutex;
 use crate::mm::PhysPageNum;
 use crate::trap::TrapContext;
 
-use super::{KernelStack, kstack_alloc, ProcessControlBlock, Signum, TaskContext};
+use super::{KernelStack, kstack_alloc, ProcessControlBlock, Signum, TaskContext, ITimerVal};
 use super::id::TaskUserRes;
 
 pub struct TaskControlBlock {
@@ -51,6 +51,8 @@ pub struct TaskControlBlockInner {
     pub frozen: bool,
     /// 被打断的trap上下文
     pub trap_ctx_backup: Option<TrapContext>,
+    /// 定时器信息
+    pub itimer: ITimerVal,
 }
 
 impl TaskControlBlockInner {
@@ -96,6 +98,7 @@ impl TaskControlBlock {
                     killed: false,
                     frozen: false,
                     trap_ctx_backup: None,
+                    itimer: ITimerVal::new(),
                 })
             },
         }
