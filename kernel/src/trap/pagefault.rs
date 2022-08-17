@@ -1,9 +1,33 @@
-use crate::{console::INFO, mm::VirtAddr, task::current_process};
+use crate::{
+    console::INFO,
+    mm::{VirtAddr, VirtPageNum},
+    task::{current_process, current_task},
+};
 use alloc::format;
 
-// 检查 addr 所在页是否采取 lazy 策略。如果是，则分配内存，并返回true；否则返回false
-pub fn lazy_check(addr: usize) -> bool {
+pub fn page_fault_handler(addr: usize, is_store: bool) -> bool {
     let va = VirtAddr::from(addr);
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+
+    if is_store {
+        let vpn = VirtPageNum::from(va.floor());
+        if let Some(pte) = inner.memory_set.translate(vpn) {
+            if pte.is_cow() && pte.is_valid() {// CoW
+                inner.memory_set.cow_alloc(vpn);
+                return true;
+            } else if pte.is_valid() {// 特判：已分配内存但发生StorePageFault，即向只读区域执行写操作
+                return false;
+            }
+        }
+    }
+    drop(inner);
+    drop(process);
+    lazy_check(va)
+}
+
+// 检查 addr 所在页是否采取 lazy 策略。如果是，则分配内存，并返回true；否则返回false
+pub fn lazy_check(va: VirtAddr) -> bool {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
     let fd_table = &inner.fd_table.clone();
@@ -31,18 +55,4 @@ pub fn lazy_check(addr: usize) -> bool {
     } else {
         false
     }
-}
-
-/// 检查 addr 所在页是否标记为CoW。如果是，则分配内存，返回true；否则返回false。
-pub fn cow_check(addr: usize) -> bool {
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
-    let vpn = VirtAddr::from(addr).floor();
-    if let Some(pte) = inner.memory_set.translate(vpn) {
-        if pte.is_cow() {
-            inner.memory_set.cow_alloc(vpn);
-            return true;
-        }
-    }
-    false
 }

@@ -7,7 +7,7 @@ use riscv::register::{
 };
 
 pub use context::TrapContext;
-pub use pagefault::{lazy_check, cow_check};
+use self::pagefault::page_fault_handler;
 
 use crate::{config::TRAMPOLINE, mm::{translated_byte_buffer, translated_ref}};
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
@@ -116,13 +116,16 @@ pub fn trap_handler() -> ! {
             //    inner.memory_set.insert_framed_area(start, start, MapPermission::X);
             //}
             // println!("{:#?}", current_trap_cx());
-            if !([
-                Trap::Exception(Exception::StoreFault), 
-                Trap::Exception(Exception::StorePageFault)
-            ].contains(&scause.cause()) 
-                && cow_check(stval) 
-                || lazy_check(stval))
-            {
+            // println!(
+            //     "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
+            //     scause.cause(),
+            //     stval,
+            //     current_trap_cx().sepc
+            // );
+
+            let is_store = [Trap::Exception(Exception::StoreFault), Trap::Exception(Exception::StorePageFault)].contains(&scause.cause());
+
+            if !page_fault_handler(stval, is_store) {
                 println!(
                     "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
                     scause.cause(),
@@ -130,11 +133,11 @@ pub fn trap_handler() -> ! {
                     current_trap_cx().sepc
                 );
                 current_add_signal(Signum::SIGSEGV);
-                let process = current_process();
-                process
-                    .inner_exclusive_access()
-                    .memory_set
-                    .print_mmap_area();
+                // let process = current_process();
+                // process
+                //     .inner_exclusive_access()
+                //     .memory_set
+                //     .print_mmap_area();
             } 
             // else {
             //     println!("[pagefault] val: {:#X}", translated_ref(current_user_token(), stval as *const usize));
