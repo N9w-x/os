@@ -188,27 +188,27 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         .to_string();
 
     //* 如果先从内存中加载initproc, 需要解注: */
-    // if work_path == "/" && path == "user_shell" {
-    //     let process = current_process();
-    //     extern "C" {
-    //         fn app_1_start();
-    //         fn app_1_end();
-    //     }
-    //     process.exec(
-    //         unsafe {
-    //             from_raw_parts(
-    //                 app_1_start as *const u8,
-    //                 app_1_end as usize - app_1_start as usize,
-    //             )
-    //         },
-    //         args_vec
-    //     );
-    //     unsafe {
-    //         asm!("sfence.vma");
-    //         asm!("fence.i");
-    //     }
-    //     return 0;
-    // }
+    if work_path == "/" && path == "user_shell" {
+        let process = current_process();
+        extern "C" {
+            fn app_1_start();
+            fn app_1_end();
+        }
+        process.exec(
+            unsafe {
+                from_raw_parts(
+                    app_1_start as *const u8,
+                    app_1_end as usize - app_1_start as usize,
+                )
+            },
+            args_vec
+        );
+        unsafe {
+            asm!("sfence.vma");
+            asm!("fence.i");
+        }
+        return 0;
+    }
 
     // 执行./xxx.sh时，自动转化为 /busybox sh ./xxx.sh
     if path.ends_with(".sh") {

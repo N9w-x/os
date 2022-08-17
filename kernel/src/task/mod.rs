@@ -161,26 +161,26 @@ lazy_static! {
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
         //* 如果先从内存中加载initproc, 需要解注: */
         //* sys_exec中还有一处需要解注 */
-        // extern "C" {
-        //     fn app_0_start();
-        //     fn app_0_end();
-        // }
-        // unsafe {
-        //     ProcessControlBlock::new(from_raw_parts(
-        //         app_0_start as *const u8,
-        //         app_0_end as usize - app_0_start as usize,
-        //     ))
-        // }
         extern "C" {
-            fn app_1_start();
-            fn app_1_end();
+            fn app_0_start();
+            fn app_0_end();
         }
         unsafe {
             ProcessControlBlock::new(from_raw_parts(
-                app_1_start as *const u8,
-                app_1_end as usize - app_1_start as usize,
+                app_0_start as *const u8,
+                app_0_end as usize - app_0_start as usize,
             ))
         }
+        // extern "C" {
+        //     fn app_1_start();
+        //     fn app_1_end();
+        // }
+        // unsafe {
+        //     ProcessControlBlock::new(from_raw_parts(
+        //         app_1_start as *const u8,
+        //         app_1_end as usize - app_1_start as usize,
+        //     ))
+        // }
     };
 }
 
