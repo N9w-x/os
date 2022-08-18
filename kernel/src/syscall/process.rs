@@ -1,3 +1,4 @@
+use alloc::slice;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -7,24 +8,24 @@ use core::slice::from_raw_parts;
 
 //use crate::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 use crate::config::{
-    CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, PAGE_SIZE, RLIMIT_FSIZE, RLIMIT_NOFILE, MEMORY_MAP_BASE,
+    CLOCK_FREQ, FD_MAX, MAP_ANONYMOUS, MAP_FIXED, MEMORY_MAP_BASE, PAGE_SIZE, RLIMIT_FSIZE,
+    RLIMIT_NOFILE,
 };
 use crate::console::{ERROR, INFO, WARNING};
-use crate::fs::{open_file, File, FileDescriptor, FileType, OpenFlags};
+use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::{
-    align_up, translated_byte_buffer, translated_ref, translated_refmut, translated_str, PTEFlags,
+    align_up, PTEFlags, translated_byte_buffer, translated_ref, translated_refmut, translated_str,
     UserBuffer, VirtAddr, VirtPageNum,
 };
-use crate::syscall::errno::EPERM;
+use crate::syscall::errno::{EINVAL, EPERM, ESRCH};
 use crate::syscall::thread::sys_gettid;
 use crate::task::{
-    add_task, current_process, current_task, current_user_token, exit_current_and_run_next,
-    pid2process, suspend_current_and_run_next, tid2task, ClearChildTid, CloneFlag, ITimerVal,
-    SigAction, SigInfo, Signum, TimeSpec, UContext, ITIMER_MANAGER, MAX_SIG, SIG_BLOCK,
-    SIG_SETMASK, SIG_UNBLOCK, SIG_DFL, current_trap_cx, TimeVal,
+    add_task, ClearChildTid, CloneFlag, current_process, current_task,
+    current_trap_cx, current_user_token, exit_current_and_run_next, ITIMER_MANAGER, ITimerVal,
+    MAX_SIG, pid2process, SIG_BLOCK, SIG_DFL, SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum,
+    suspend_current_and_run_next, tid2task, TimeSpec, TimeVal, UContext,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
-use alloc::slice;
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code, false);
@@ -227,8 +228,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         let len = app_inode.get_size();
         // let mut inner = process.inner_exclusive_access();
         let fd = process.inner_exclusive_access().alloc_fd();
-        process.inner_exclusive_access().fd_table[fd] =
-            Some(FileDescriptor::Regular(app_inode));
+        process.inner_exclusive_access().fd_table[fd] = Some(FileDescriptor::Regular(app_inode));
         // drop(inner);
         let fd_table = process.inner_exclusive_access().fd_table.clone();
         // println!("[debug] before kmmap:");
@@ -252,33 +252,33 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
         -1
     }
     // match path.as_str() {
-        //"runtest.exe" => {
-        //    let data_lock = TEST_SH_DATA.exclusive_access();
-        //    let data = data_lock.as_slice();
-        //    process.exec(data, args_vec);
-        //    0
-        //}
-        //"entry-static.exe" => {
-        //    let data_lock = ENTRY_STATIC_DATA.exclusive_access();
-        //    let data = data_lock.as_slice();
-        //    process.exec(data, args_vec);
-        //    0
-        //}
-        // _ => {
-            // if let Some(app_inode) = open_file(
-            //     &work_path,
-            //     path.as_str(),
-            //     OpenFlags::RDONLY,
-            //     FileType::Regular,
-            // ) {
-            //     let all_data = app_inode.read_all();
-            //     process.exec(&all_data, args_vec);
-
-            //     // return argc because cx.x[10] will be covered with it later
-            //     0
-            // } else {
-            //     -1
-            // }
+    //"runtest.exe" => {
+    //    let data_lock = TEST_SH_DATA.exclusive_access();
+    //    let data = data_lock.as_slice();
+    //    process.exec(data, args_vec);
+    //    0
+    //}
+    //"entry-static.exe" => {
+    //    let data_lock = ENTRY_STATIC_DATA.exclusive_access();
+    //    let data = data_lock.as_slice();
+    //    process.exec(data, args_vec);
+    //    0
+    //}
+    // _ => {
+    // if let Some(app_inode) = open_file(
+    //     &work_path,
+    //     path.as_str(),
+    //     OpenFlags::RDONLY,
+    //     FileType::Regular,
+    // ) {
+    //     let all_data = app_inode.read_all();
+    //     process.exec(&all_data, args_vec);
+    
+    //     // return argc because cx.x[10] will be covered with it later
+    //     0
+    // } else {
+    //     -1
+    // }
     //     }
     // }
 }
@@ -377,18 +377,28 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32, options: isize) -> isize
 }
 
 pub fn sys_kill(pid: usize, signal: u64) -> isize {
-    if let Some(process) = pid2process(pid) {
+    //if let Some(process) = pid2process(pid) {
+    //    if let Some(flag) = Signum::from_bits(1 << signal) {
+    //        // 向主线程发送signal
+    //        let process_inner = process.inner_exclusive_access();
+    //        let task = process_inner.tasks[0].as_ref().unwrap();
+    //        task.inner_exclusive_access().signals |= flag;
+    //        0
+    //    } else {
+    //        -1
+    //    }
+    //} else {
+    //    -1
+    //}
+    if let Some(task) = tid2task(pid) {
         if let Some(flag) = Signum::from_bits(1 << signal) {
-            // 向主线程发送signal
-            let process_inner = process.inner_exclusive_access();
-            let task = process_inner.tasks[0].as_ref().unwrap();
             task.inner_exclusive_access().signals |= flag;
             0
         } else {
-            -1
+            -EINVAL
         }
     } else {
-        -1
+        -ESRCH
     }
 }
 
@@ -471,7 +481,8 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
 }
 
 pub fn sys_mprotect(addr: usize, len: usize, prot: usize) -> isize {
-    if addr == 0 || addr % PAGE_SIZE != 0 {// addr对齐到页面
+    if addr == 0 || addr % PAGE_SIZE != 0 {
+        // addr对齐到页面
         -1
     } else {
         // current_process()
@@ -635,7 +646,7 @@ pub fn sys_sigreturn() -> isize {
     // 将备份的trap上下文恢复
     let trap_cx = task_inner.get_trap_cx();
     let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
-    
+
     *trap_cx = task_inner.trap_ctx_backup.take().unwrap();
 
     // TODO: SIGINFO
@@ -787,23 +798,39 @@ pub fn sys_geteuid() -> isize {
 }
 
 #[repr(C)]
-pub struct RUsage{
-    ru_utime   :TimeVal,     /* user CPU time used */
-    ru_stime   :TimeVal,     /* system CPU time used */
-    ru_maxrss  :isize  ,     /* maximum resident set size */
-    ru_ixrss   :isize  ,     /* integral shared memory size */
-    ru_idrss   :isize  ,     /* integral unshared data size */
-    ru_isrss   :isize  ,     /* integral unshared stack size */
-    ru_minflt  :isize  ,     /* page reclaims (soft page faults) */
-    ru_majflt  :isize  ,     /* page faults (hard page faults) */
-    ru_nswap   :isize  ,     /* swaps */
-    ru_inblock :isize  ,     /* block input operations */
-    ru_oublock :isize  ,     /* block output operations */
-    ru_msgsnd  :isize  ,     /* IPC messages sent */
-    ru_msgrcv  :isize  ,     /* IPC messages received */
-    ru_nsignals:isize  ,     /* signals received */
-    ru_nvcsw   :isize  ,     /* voluntary context switches */
-    ru_nivcsw  :isize  ,     /* involuntary context switches */
+pub struct RUsage {
+    ru_utime: TimeVal,
+    /* user CPU time used */
+    ru_stime: TimeVal,
+    /* system CPU time used */
+    ru_maxrss: isize,
+    /* maximum resident set size */
+    ru_ixrss: isize,
+    /* integral shared memory size */
+    ru_idrss: isize,
+    /* integral unshared data size */
+    ru_isrss: isize,
+    /* integral unshared stack size */
+    ru_minflt: isize,
+    /* page reclaims (soft page faults) */
+    ru_majflt: isize,
+    /* page faults (hard page faults) */
+    ru_nswap: isize,
+    /* swaps */
+    ru_inblock: isize,
+    /* block input operations */
+    ru_oublock: isize,
+    /* block output operations */
+    ru_msgsnd: isize,
+    /* IPC messages sent */
+    ru_msgrcv: isize,
+    /* IPC messages received */
+    ru_nsignals: isize,
+    /* signals received */
+    ru_nvcsw: isize,
+    /* voluntary context switches */
+    ru_nivcsw: isize,
+    /* involuntary context switches */
 }
 
 pub fn sys_getrusage(who: isize, usage: *mut RUsage) -> isize {

@@ -186,7 +186,7 @@ impl OSInode {
     pub fn get_dirent(&self, dirent: &mut Dirent, offset: usize) -> isize {
         let mut inner = self.inner.lock();
         if let Some((mut name, offset, first_clu, attr)) =
-        inner.inode.dirent_info(inner.offset + offset)
+            inner.inode.dirent_info(inner.offset + offset)
         {
             name.push('\0');
             let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
@@ -196,7 +196,7 @@ impl OSInode {
             } else {
                 DTYPE_UNKNOWN
             };
-    
+
             dirent.fill_info(
                 &name,
                 first_clu as u64,
@@ -210,14 +210,14 @@ impl OSInode {
             -1
         }
     }
-    
+
     pub fn dirent_info(&self, offset: usize) -> Option<(String, u32, u32, u8)> {
         self.inner.lock().inode.dirent_info(offset)
     }
-    
+
     pub fn get_fstat(&self, fstat: &mut Kstat) {
         let vfile = self.inner.lock().inode.clone();
-        
+    
         let (size, access_t, modify_t, create_t, inode_num) = vfile.stat();
         let st_mode = {
             if self.get_name() == "null" {
@@ -229,7 +229,7 @@ impl OSInode {
             }
         }
             .bits();
-        
+    
         fstat.update(
             self.get_inode_id() as u64,
             st_mode,
@@ -383,6 +383,7 @@ pub fn list_apps() {
     println!("**************/")
 }
 
+#[derive(Eq, PartialEq)]
 pub enum FileType {
     Dir,
     Regular,
@@ -412,12 +413,15 @@ pub fn open_file(
     }
     
     let cur_inode = get_current_inode(work_path);
-    let mut path_split: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    
+    let mut path_split: Vec<&str> = path.split('/').collect();
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
         //如果文件存在删除对应文件
         if let Some(inode) = cur_inode.find_vfile_bypath(&path_split) {
-            inode.remove();
+            if _type == FileType::Regular {
+                inode.remove();
+            }
         }
         
         let filename = path_split.pop().unwrap();

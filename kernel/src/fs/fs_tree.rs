@@ -34,8 +34,8 @@ pub fn get_abs_path(work_path: &str, path: &str) -> String {
         .filter(|&s| !s.is_empty())
         .collect::<Vec<&str>>();
     
-    for path_part in path_vec {
-        match path_part {
+    for path_part in path_vec.iter() {
+        match *path_part {
             "." => continue,
             ".." => {
                 work_path_vec.pop();

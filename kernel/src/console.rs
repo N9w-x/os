@@ -1,7 +1,6 @@
 use alloc::format;
 use core::fmt::{self, Write};
 
-use crate::drivers::chardev::CharDevice;
 use crate::sbi::{console_getchar, console_putchar};
 
 struct Stdout;

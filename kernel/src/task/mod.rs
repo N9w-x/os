@@ -48,7 +48,7 @@ pub fn suspend_current_and_run_next() -> isize {
         .contains(Signum::SIGKILL)
     {
         drop(task);
-        //exit_current_and_run_next(-9 as i32, false);
+        exit_current_and_run_next(-9, false);
         return -1;
     }
     
