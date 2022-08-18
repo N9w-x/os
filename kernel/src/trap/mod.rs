@@ -7,7 +7,7 @@ use riscv::register::{
 };
 
 pub use context::TrapContext;
-use self::pagefault::page_fault_handler;
+pub use self::pagefault::{page_fault_handler, lazy_check};
 
 use crate::{config::TRAMPOLINE, mm::{translated_byte_buffer, translated_ref}};
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};

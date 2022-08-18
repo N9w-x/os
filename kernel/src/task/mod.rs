@@ -24,7 +24,7 @@ pub use timer::{ITIMER_MANAGER, ITimerVal, TimeSpec, TimeVal, UTIME_NOW, UTIME_O
 
 use crate::config::PAGE_SIZE;
 use crate::fs::{File, FileType, open_file, OpenFlags, OSInode};
-use crate::mm::{add_free, translated_refmut, UserBuffer};
+use crate::mm::{add_free, translated_refmut, UserBuffer, VirtPageNum, VirtAddr};
 
 mod context;
 mod futex;
@@ -95,10 +95,9 @@ pub fn unblock_task(task: Arc<TaskControlBlock>) {
 
 pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
     let token = current_user_token();
-    let task = take_current_task().unwrap();
+    let task = current_task().unwrap();
     let tid = task.gettid();
     let mut task_inner = task.inner_exclusive_access();
-    let process = task.process.upgrade().unwrap();
     let id = task_inner.res.as_ref().unwrap().id;
     
     if task_inner.clear_child_tid != 0 {
@@ -112,8 +111,10 @@ pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
     task_inner.res = None;
     // here we do not remove the thread since we are still using the kstack
     // it will be deallocated when sys_waittid is called
+    let process = task.process.upgrade().unwrap();
     drop(task_inner);
     drop(task);
+    take_current_task();
     // however, if this is the main thread of current process
     // the process should terminate at once
     if id == 0 || is_exit_group {

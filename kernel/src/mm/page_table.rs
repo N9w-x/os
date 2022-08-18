@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use bitflags::*;
 
-use crate::config::PAGE_SIZE;
+use crate::{config::PAGE_SIZE, trap::{page_fault_handler, lazy_check}};
 
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 
@@ -174,7 +174,23 @@ impl PageTable {
             (aligned_pa_usize + offset).into()
         })
     }
-    
+
+    pub fn translate_va_check(&self, va: VirtAddr) -> Option<PhysAddr> {
+        let vpn = VirtPageNum::from(va.floor());
+        if let Some(pte) = self.translate(vpn) && pte.is_valid() {
+            Some(pte.ppn())
+        } else if lazy_check(va) {
+            Some(self.translate(vpn).unwrap().ppn())
+        } else {
+            None
+        }.map(|ppn| {
+            let aligned_pa: PhysAddr = ppn.into();
+            let offset = va.page_offset();
+            let aligned_pa_usize: usize = aligned_pa.into();
+            (aligned_pa_usize + offset).into()
+        })
+    }
+
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
@@ -221,7 +237,7 @@ pub fn translated_str(token: usize, ptr: *const u8) -> String {
     let mut va = ptr as usize;
     loop {
         let ch: u8 = *(page_table
-            .translate_va(VirtAddr::from(va))
+            .translate_va_check(VirtAddr::from(va))
             .unwrap()
             .get_mut());
         if ch == 0 {
@@ -236,7 +252,7 @@ pub fn translated_str(token: usize, ptr: *const u8) -> String {
 pub fn translated_ref<T>(token: usize, ptr: *const T) -> &'static T {
     let page_table = PageTable::from_token(token);
     page_table
-        .translate_va(VirtAddr::from(ptr as usize))
+        .translate_va_check(VirtAddr::from(ptr as usize))
         .unwrap()
         .get_ref()
 }
@@ -245,7 +261,7 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
     let page_table = PageTable::from_token(token);
     let va = ptr as usize;
     page_table
-        .translate_va(VirtAddr::from(va))
+        .translate_va_check(VirtAddr::from(va))
         .unwrap()
         .get_mut()
 }

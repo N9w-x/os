@@ -144,6 +144,8 @@ pub fn sys_pipe(pipe: *mut u32, flags: u32) -> isize {
     inner.fd_table[read_fd] = Some(FileDescriptor::Abstract(pipe_read));
     let write_fd = inner.alloc_fd();
     inner.fd_table[write_fd] = Some(FileDescriptor::Abstract(pipe_write));
+    drop(inner);
+    drop(process);
     *translated_refmut(token, pipe as *mut [u32; 2]) = [read_fd as u32, write_fd as u32];
     0
 }
@@ -780,13 +782,13 @@ pub fn sys_ppoll(
     sigmask: *const Signum,
 ) -> isize {
     let token = current_user_token();
-    let process = current_process();
-    let mut inner = process.inner_exclusive_access();
     let mut ret = 0;
     
     for i in 0..nfds {
         let mut poll_fd = translated_refmut(token, unsafe { fds.add(i) });
         
+        let process = current_process();
+        let mut inner = process.inner_exclusive_access();
         if let Some(fd) = &inner.fd_table[poll_fd.fd as usize] {
             // ! 这里只处理了STDIN
             if poll_fd.fd == 0 && poll_fd.events & POLLIN != 0 {
@@ -827,7 +829,7 @@ pub fn sys_sendfile(out_fd: isize, in_fd: isize, offset: *mut usize, len: usize)
     if offset as usize != 0 {
         match &file_in {
             FileDescriptor::Regular(inode) => {
-                inode.set_offset(*translated_refmut(token, offset));
+                inode.set_offset(*translated_ref(token, offset));
             }
             _ => return -EPERM,
         }
