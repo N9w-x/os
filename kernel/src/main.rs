@@ -78,7 +78,7 @@ pub fn rust_main() -> ! {
         trap::init();
         trap::enable_timer_interrupt();
         timer::set_next_trigger();
-        board::device_init();
+        //board::device_init();
         fs::list_apps();
         fs::init_rootfs();
         task::add_initproc();
