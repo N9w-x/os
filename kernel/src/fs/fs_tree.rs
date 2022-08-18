@@ -28,7 +28,7 @@ pub fn get_abs_path(work_path: &str, path: &str) -> String {
         .split('/')
         .filter(|&t| !t.is_empty())
         .collect::<Vec<&str>>();
-    
+
     let mut work_path_vec = work_path
         .split('/')
         .filter(|&s| !s.is_empty())
@@ -43,10 +43,7 @@ pub fn get_abs_path(work_path: &str, path: &str) -> String {
             _ => work_path_vec.push(path_part),
         }
     }
-    
-    work_path_vec
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>()
-        .join("")
+    let mut abs_path = String::from('/');
+    abs_path.push_str(&work_path_vec.join("/"));
+    abs_path
 }

@@ -5,7 +5,7 @@ use spin::Mutex;
 use virtio_drivers::{VirtIOBlk, VirtIOHeader};
 
 use crate::mm::{
-    frame_alloc, frame_dealloc, KERNEL_TOKEN, FrameTracker, PageTable, PhysAddr, PhysPageNum,
+    frame_alloc, frame_dealloc, FrameTracker, KERNEL_TOKEN, PageTable, PhysAddr, PhysPageNum,
     StepByOne, VirtAddr,
 };
 
@@ -32,10 +32,6 @@ impl BlockDevice for VirtIOBlock {
             .lock()
             .write_block(block_id, buf)
             .expect("Error when writing VirtIOBlk");
-    }
-    
-    fn handle_irq(&self) {
-        //todo!()
     }
 }
 

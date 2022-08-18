@@ -239,7 +239,7 @@ impl OSInode {
             create_t,
         );
     }
-    
+
     pub fn lseek(&self, offset: isize, whence: i32) -> isize {
         const SEEK_SET: i32 = 0;
         const SEEK_CUR: i32 = 1;
@@ -252,7 +252,7 @@ impl OSInode {
         } else if offset < 0 {
             return -1;
         }
-        
+
         match whence {
             SEEK_SET => {
                 inner.offset = offset as usize;
@@ -266,7 +266,7 @@ impl OSInode {
             }
             _ => return -1,
         }
-        
+
         inner.offset as isize
     }
 }
@@ -377,7 +377,7 @@ impl OpenFlags {
 
 pub fn list_apps() {
     println!("/**** APPS ****");
-    for app in ROOT_INODE.ls_lite().unwrap() {
+    for app in ROOT_INODE.ls().unwrap() {
         println!("{}", app.0);
     }
     println!("**************/")
@@ -408,13 +408,13 @@ pub fn open_file(
     let (readable, writable) = flags.read_write();
     let abs_path = get_abs_path(work_path, path);
     
-    if let Some(vfile) = search_vfile(&abs_path) {
-        return Some(Arc::new(OSInode::new(readable, writable, vfile)));
-    }
+    //if let Some(vfile) = search_vfile(&abs_path) {
+    //    return Some(Arc::new(OSInode::new(readable, writable, vfile)));
+    //}
     
     let cur_inode = get_current_inode(work_path);
-    
     let mut path_split: Vec<&str> = path.split('/').collect();
+    
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
         //如果文件存在删除对应文件

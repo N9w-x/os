@@ -20,12 +20,12 @@ use crate::mm::{
     translated_byte_buffer, translated_ref, translated_refmut, translated_str, UserBuffer,
 };
 use crate::task::{
-    current_process, current_task, current_user_token, Signum, suspend_current_and_run_next,
-    TimeSpec, UTIME_NOW, UTIME_OMIT, CloneFlag,
+    CloneFlag, current_process, current_task, current_user_token, Signum,
+    suspend_current_and_run_next, TimeSpec, UTIME_NOW, UTIME_OMIT,
 };
 use crate::timer::{get_time_ns, NSEC_PER_SEC};
 
-use super::errno::{EBADF, EMFILE, ENOENT, EPERM, ESPIPE, EINVAL};
+use super::errno::{EBADF, EINVAL, EMFILE, ENOENT, EPERM, ESPIPE};
 
 const AT_FD_CWD: isize = -100;
 
@@ -200,7 +200,6 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let path = translated_str(token, path);
-
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::CREATE, FileType::Dir)
     } else if dir_fd == AT_FD_CWD {
@@ -276,7 +275,7 @@ fn getdents64_inner(file: Arc<OSInode>, user_buf: &mut UserBuffer, len: usize) -
             user_buf.write_at(total_read, vec![0u8; pad_size].as_slice());
             total_read += pad_size;
         }
-    
+
         offset = new_offset as usize;
     }
     file.set_offset(offset);
@@ -288,7 +287,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let mut user_buf = UserBuffer::new(translated_byte_buffer(token, buf, len));
-    
+
     //我为什么会喜欢这种写法(
     let dir_inode = if fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
@@ -309,7 +308,7 @@ pub fn sys_getdents64(fd: isize, buf: *const u8, len: usize) -> isize {
             _ => return -1,
         }
     };
-    
+
     getdents64_inner(dir_inode, &mut user_buf, len)
 }
 
@@ -428,7 +427,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         let inner = pcb.inner_exclusive_access();
         let fd_usize = fd as usize;
         if fd_usize >= inner.fd_table.len() {
-            return -1;
+            return -ENOENT;
         }
         
         return match &inner.fd_table[fd_usize] {
@@ -438,7 +437,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
                 user_buf.write(kstat.as_bytes());
                 0
             }
-            _ => -1,
+            _ => -ENOENT,
         };
     } {
         Some(os_inode) => {
@@ -451,7 +450,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
             user_buf.write(kstat.as_bytes());
             0
         }
-        None => -1,
+        None => -ENOENT,
     };
 }
 
@@ -897,10 +896,10 @@ pub fn sys_pselect(
     if timeout.tv_sec == 0 && timeout.tv_nsec == 0 {
         let pcb = current_process();
         let inner = pcb.inner_exclusive_access();
-        
+    
         if rfds as usize != 0 {
             let read_fds = translated_refmut(token, rfds);
-            
+        
             //read fd set
             for i in 0..nfds as usize {
                 if read_fds.get_bit(i) {
@@ -915,10 +914,10 @@ pub fn sys_pselect(
                 }
             }
         }
-        
+    
         if wfds as usize != 0 {
             let write_fds = translated_refmut(token, wfds);
-            
+        
             //write fd set
             for i in 0..nfds as usize {
                 if write_fds.get_bit(i) {
@@ -932,7 +931,7 @@ pub fn sys_pselect(
                 }
             }
         }
-        
+    
         if efds as usize != 0 {
             let err_fds = translated_refmut(token, efds);
             err_fds.clear();
@@ -945,19 +944,19 @@ pub fn sys_pselect(
                 FdSet(0)
             }
         };
-        
+    
         let rfd_clone = clone_fd(rfds);
         let wfd_clone = clone_fd(wfds);
         // let errfd_clone = clone_fd(efds);
         if efds as usize != 0 {
             translated_refmut(token, efds).clear();
         }
-        
+    
         loop {
             let pcb = current_process();
             let inner = pcb.inner_exclusive_access();
             let mut ret = 0usize;
-            
+        
             //handle rfd
             if rfd_clone.0 != 0 {
                 let read_fds = translated_refmut(token, rfds);
@@ -981,7 +980,7 @@ pub fn sys_pselect(
                     }
                 }
             }
-            
+        
             //handle wfd
             if wfd_clone.0 != 0 {
                 let write_fds = translated_refmut(token, wfds);
@@ -1005,7 +1004,7 @@ pub fn sys_pselect(
                     }
                 }
             }
-            
+        
             if ret == 0 {
                 drop(inner);
                 drop(pcb);
