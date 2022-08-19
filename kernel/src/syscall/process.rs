@@ -377,29 +377,29 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32, options: isize) -> isize
 }
 
 pub fn sys_kill(pid: usize, signal: u64) -> isize {
-    //if let Some(process) = pid2process(pid) {
-    //    if let Some(flag) = Signum::from_bits(1 << signal) {
-    //        // 向主线程发送signal
-    //        let process_inner = process.inner_exclusive_access();
-    //        let task = process_inner.tasks[0].as_ref().unwrap();
-    //        task.inner_exclusive_access().signals |= flag;
-    //        0
-    //    } else {
-    //        -1
-    //    }
-    //} else {
-    //    -1
-    //}
-    if let Some(task) = tid2task(pid) {
-        if let Some(flag) = Signum::from_bits(1 << signal) {
-            task.inner_exclusive_access().signals |= flag;
-            0
-        } else {
-            -EINVAL
-        }
+    if let Some(process) = pid2process(pid) {
+       if let Some(flag) = Signum::from_bits(1 << signal) {
+           // 向主线程发送signal
+           let process_inner = process.inner_exclusive_access();
+           let task = process_inner.tasks[0].as_ref().unwrap();
+           task.inner_exclusive_access().signals |= flag;
+           0
+       } else {
+           -EINVAL
+       }
     } else {
-        -ESRCH
+       -ESRCH
     }
+    // if let Some(task) = tid2task(pid) {
+    //     if let Some(flag) = Signum::from_bits(1 << signal) {
+    //         task.inner_exclusive_access().signals |= flag;
+    //         0
+    //     } else {
+    //         -EINVAL
+    //     }
+    // } else {
+    //     -ESRCH
+    // }
 }
 
 pub fn sys_tkill(tid: usize, signal: usize) -> isize {

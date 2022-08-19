@@ -4,7 +4,7 @@ use lazy_static::*;
 
 use crate::trap::TrapContext;
 
-use super::{fetch_task, TaskStatus};
+use super::{fetch_task, TaskStatus, add_task};
 use super::{ProcessControlBlock, TaskContext, TaskControlBlock};
 use super::__switch;
 
@@ -39,6 +39,17 @@ lazy_static! {
 pub fn run_tasks() {
     loop {
         let mut processor = PROCESSOR.lock();
+
+        // 本来下面这段代码应该由suspend_current_and_run_next完成
+        // 但是若如此做，则内核栈会被其他核“趁虚而入”
+        // 将suspend_current_and_run_next中的add_task延后到调度完成后
+        if let Some(last_task) = processor.take_current() {
+            // Do not enqueue blocking tasks!
+            if last_task.inner_exclusive_access().task_status == TaskStatus::Ready {
+                add_task(last_task);
+            }
+        }
+
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively

@@ -41,27 +41,25 @@ mod timer;
 
 pub fn suspend_current_and_run_next() -> isize {
     // There must be an application running.
-    let task = take_current_task().unwrap();
-    if task
-        .inner_exclusive_access()
-        .signals
-        .contains(Signum::SIGKILL)
-    {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+
+    if task_inner.signals.contains(Signum::SIGKILL) || task_inner.killed {
+        drop(task_inner);
         drop(task);
         exit_current_and_run_next(-9, false);
         return -1;
     }
     
-    // ---- access current TCB exclusively
-    let mut task_inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
-    drop(task_inner);
     // ---- release current TCB
+    drop(task_inner);
+    drop(task);
     
     // push back to ready queue.
-    add_task(task);
+    // add_task(task);
     // jump to scheduling cycle
     schedule(task_cx_ptr);
     0

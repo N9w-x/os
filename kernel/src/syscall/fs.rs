@@ -63,6 +63,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         if !file.readable() {
             return -EPERM;
         }
+        drop(process);
         // release current task TCB manually to avoid multi-borrow
         let ret = file.read(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize;
         ret
