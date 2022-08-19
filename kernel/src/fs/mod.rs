@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use fat32::VFile;
 
 pub use dev_fs::open_dev_file;
+pub use fake_file::FakeFile;
 pub use file_descriptor::FileDescriptor;
 pub use fs_info::*;
 pub use inode::{ch_dir, FileType, init_rootfs, list_apps, open_file, OpenFlags, OSInode};
@@ -17,6 +18,7 @@ use crate::fs::fs_tree::{insert_vfile, search_vfile};
 use crate::mm::UserBuffer;
 
 mod dev_fs;
+mod fake_file;
 mod file_descriptor;
 mod fs_info;
 mod fs_tree;
@@ -43,16 +45,15 @@ pub trait File: Send + Sync {
 }
 
 pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
-    if curr_path == "/" || curr_path.starts_with('/') {
+    if curr_path == "/" {
         ROOT_INODE.clone()
     } else {
         match search_vfile(curr_path) {
             Some(vfile) => vfile,
             None => {
-                let path_vec: Vec<&str> = curr_path.split('/').collect();
-                let vfile = ROOT_INODE.find_vfile_bypath(&path_vec).unwrap();
-                insert_vfile(curr_path, vfile.clone());
-                vfile
+                let path_vec: Vec<&str> = curr_path.split('/').filter(|&s| !s.is_empty()).collect();
+                ROOT_INODE.find_vfile_bypath(&path_vec).unwrap()
+                //insert_vfile(curr_path, vfile.clone());
             }
         }
     }

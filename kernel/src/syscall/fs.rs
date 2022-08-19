@@ -12,7 +12,7 @@ use spin::Mutex;
 
 use crate::console::INFO;
 use crate::fs::{
-    ch_dir, Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, FdSet, File, FileDescriptor,
+    ch_dir, Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, FakeFile, FdSet, File, FileDescriptor,
     FileType, get_current_inode, IOVec, Kstat, make_pipe, open_dev_file, open_file, OpenFlags, OSInode,
     PollFD, POLLIN, VFSFlag, WorkPath,
 };
@@ -85,6 +85,17 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
         let mut inner = process.inner_exclusive_access();
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(FileDescriptor::Abstract(dev_fs));
+        fd as isize
+    } else if path.starts_with("/var/tmp/") {
+        let mut inner = process.inner_exclusive_access();
+        let _type = if flags.contains(OpenFlags::DIRECTORY) {
+            FileType::Dir
+        } else {
+            FileType::Regular
+        };
+        let fake = FakeFile::new(&path, _type);
+        let fd = inner.alloc_fd();
+        inner.fd_table[fd] = Some(FileDescriptor::Fake(Arc::new(fake)));
         fd as isize
     } else {
         //获取要打开文件的inode
@@ -204,11 +215,25 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let path = translated_str(token, path);
+    if path.starts_with("/var/tmp/") {
+        return 0;
+    }
+    
     match if WorkPath::is_abs_path(&path) {
-        open_file("/", &path, OpenFlags::CREATE, FileType::Dir)
+        open_file(
+            "/",
+            &path,
+            OpenFlags::CREATE | OpenFlags::DIRECTORY,
+            FileType::Dir,
+        )
     } else if dir_fd == AT_FD_CWD {
         let work_path = pcb.inner_exclusive_access().work_path.to_string();
-        open_file(&work_path, &path, OpenFlags::CREATE, FileType::Dir)
+        open_file(
+            &work_path,
+            &path,
+            OpenFlags::CREATE | OpenFlags::DIRECTORY,
+            FileType::Dir,
+        )
     } else {
         let mut inner = pcb.inner_exclusive_access();
         let fd_usize = dir_fd as usize;
@@ -365,7 +390,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     let token = current_user_token();
     let path = translated_str(token, path);
     let pcb = current_process();
-
+    
+    if path.starts_with("/var/tmp/") {
+        return 0;
+    }
+    
     match if WorkPath::is_abs_path(&path) {
         open_file("/", &path, OpenFlags::RDWR, FileType::Regular)
     } else if fd == AT_FD_CWD {
@@ -374,11 +403,11 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     } else {
         let fd_usize = fd as usize;
         let mut inner = pcb.inner_exclusive_access();
-
+        
         if fd_usize >= inner.fd_table.len() {
             return -1;
         }
-    
+
         match &inner.fd_table[fd_usize] {
             Some(FileDescriptor::Regular(os_inode)) => Some(os_inode.clone()),
             _ => return -1,
@@ -411,7 +440,7 @@ pub fn sys_new_fstatat(fd: isize, path: *const u8, buf: *mut u8, flags: isize) -
         buf,
         core::mem::size_of::<Kstat>(),
     ));
-    
+
     // TODO 增加/dev/null文件
     if path == "/dev/null" {
         let mut kstat = Kstat {
@@ -549,6 +578,7 @@ pub fn sys_readv(fd: usize, iov_ptr: usize, iov_cnt: usize) -> isize {
         let f: Arc<dyn File + Send + Sync> = match file {
             FileDescriptor::Regular(os_inode) => os_inode.clone(),
             FileDescriptor::Abstract(os_inode) => os_inode.clone(),
+            FileDescriptor::Fake(inode) => inode.clone(),
         };
         if !f.readable() {
             return -EPERM;
@@ -651,6 +681,7 @@ pub fn sys_pread64(fd: usize, buf: *mut u8, count: usize, offset: usize) -> isiz
                 read_cnt
             }
             FileDescriptor::Abstract(_) => -ESPIPE,
+            FileDescriptor::Fake(inode) => -ESPIPE,
         }
     } else {
         -EBADF

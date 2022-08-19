@@ -50,7 +50,7 @@ impl WorkPath {
     }
     
     pub fn is_abs_path(path: &str) -> bool {
-        path.starts_with("/")
+        path.starts_with('/')
     }
 }
 

@@ -13,19 +13,19 @@ use xmas_elf::ElfFile;
 use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
-    MAP_ANONYMOUS, MAP_FIXED, MEMORY_END, MMIO, PAGE_SIZE, SIGRETURN_TRAMPOLINE, TRAMPOLINE,
-    KERNEL_MEMORY_MAP_BASE, MEMORY_MAP_BASE, USER_STACK_TOP,
+    KERNEL_MEMORY_MAP_BASE, MAP_ANONYMOUS, MAP_FIXED, MEMORY_END, MEMORY_MAP_BASE, MMIO, PAGE_SIZE,
+    SIGRETURN_TRAMPOLINE, TRAMPOLINE, USER_STACK_TOP,
 };
 use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::aux::AuxHeader;
 use crate::mm::frame_allocator::FRAME_ALLOCATOR;
 use crate::mm::mmap::MemoryMapArea;
 
-use super::frame_allocator::{frame_add_ref, frame_get_ref};
-use super::{frame_alloc, page_table, translated_byte_buffer, FrameTracker, UserBuffer};
-use super::{PTEFlags, PageTable, PageTableEntry};
+use super::{frame_alloc, FrameTracker, page_table, translated_byte_buffer, UserBuffer};
+use super::{PageTable, PageTableEntry, PTEFlags};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
+use super::frame_allocator::{frame_add_ref, frame_get_ref};
 
 extern "C" {
     fn stext();
@@ -63,7 +63,7 @@ impl MemorySet {
     //     const PROT_READ: usize = 1;
     //     const PROT_WRITE: usize = 2;
     //     const PROT_EXEC: usize = 4;
-        
+
     //     let pte_res = self.set_pte_flags(vpn, flags);
     //     let mut map_area_res = -1;
     //     for area in &mut self.areas {
@@ -78,12 +78,12 @@ impl MemorySet {
     //             if flags & PROT_EXEC != 0 {
     //                 map_perm |= MapPermission::X
     //             }
-                
+
     //             area.map_perm = map_perm;
     //             break;
     //         }
     //     }
-        
+
     //     if map_area_res == -1 || pte_res == -1 {
     //         -1
     //     } else {
@@ -609,6 +609,8 @@ impl MemorySet {
     pub fn recycle_data_pages(&mut self) {
         //*self = Self::new_bare();
         self.areas.clear();
+        self.mmap_areas.clear();
+        self.heap.clear()
     }
 
     pub fn print_map_area(&self) {
@@ -701,7 +703,7 @@ impl MemorySet {
         }
         false
     }
-
+    
     pub fn lazy_alloc_map_area(&mut self, va: VirtAddr) -> bool {
         let start_va: VirtAddr = va.floor().into();
         let end_va: VirtAddr = (start_va.0 + PAGE_SIZE).into();

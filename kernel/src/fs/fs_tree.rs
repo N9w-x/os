@@ -7,12 +7,18 @@ use fat32::VFile;
 use lazy_static::lazy_static;
 use spin::RwLock;
 
+use crate::fs::inode::ROOT_INODE;
+
 lazy_static! {
     pub static ref FS_TREE: RwLock<BTreeMap<String, Arc<VFile>>> = RwLock::new(BTreeMap::new());
 }
 
 pub fn search_vfile(path: &str) -> Option<Arc<VFile>> {
-    FS_TREE.read().get(path).cloned()
+    if path == "/" {
+        Some(ROOT_INODE.clone())
+    } else {
+        FS_TREE.read().get(path).cloned()
+    }
 }
 
 pub fn insert_vfile(path: &str, vfile: Arc<VFile>) {

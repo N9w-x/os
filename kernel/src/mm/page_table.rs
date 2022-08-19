@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use bitflags::*;
 
-use crate::{config::PAGE_SIZE, trap::{page_fault_handler, lazy_check}};
+use crate::{config::PAGE_SIZE, trap::{lazy_check, page_fault_handler}};
 
 use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 
@@ -176,7 +176,7 @@ impl PageTable {
     }
 
     pub fn translate_va_check(&self, va: VirtAddr) -> Option<PhysAddr> {
-        let vpn = VirtPageNum::from(va.floor());
+        let vpn = va.floor();
         if let Some(pte) = self.translate(vpn) && pte.is_valid() {
             Some(pte.ppn())
         } else if lazy_check(va) {

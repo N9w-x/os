@@ -11,7 +11,7 @@ use spin::Mutex;
 use crate::drivers::BLOCK_DEVICE;
 use crate::fs::{File, get_current_inode};
 use crate::fs::fs_info::{Dirent, DTYPE_DIR, DTYPE_REG, DTYPE_UNKNOWN, Kstat, VFSFlag};
-use crate::fs::fs_tree::{get_abs_path, insert_vfile, search_vfile};
+use crate::fs::fs_tree::{get_abs_path, insert_vfile, remove_vfile, search_vfile};
 use crate::mm::UserBuffer;
 use crate::timer::get_time_us;
 
@@ -150,7 +150,7 @@ impl OSInode {
             println!("It's not a directory");
             return None;
         }
-        let mut path_split: Vec<&str> = path.split('/').collect();
+        let mut path_split: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         let (readable, writable) = (true, true);
         if let Some(target_inode) = inode.find_vfile_bypath(&path_split) {
             target_inode.remove();
@@ -175,7 +175,7 @@ impl OSInode {
 
     pub fn find(&self, path: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
         let inner = self.inner.lock();
-        let path_split = path.split('/').collect();
+        let path_split = path.split('/').filter(|s| !s.is_empty()).collect();
 
         inner.inode.find_vfile_bypath(&path_split).map(|inode| {
             let (readable, writable) = flags.read_write();
@@ -275,11 +275,11 @@ impl File for OSInode {
     fn readable(&self) -> bool {
         self.readable
     }
-    
+
     fn writable(&self) -> bool {
         self.writable
     }
-    
+
     fn read(&self, mut buf: UserBuffer) -> usize {
         let mut inner = self.inner.lock();
         let mut read_size = 0;
@@ -291,10 +291,10 @@ impl File for OSInode {
             inner.offset += size;
             read_size += size;
         }
-        
+
         read_size
     }
-    
+
     fn write(&self, buf: UserBuffer) -> usize {
         let mut inner = self.inner.lock();
         let mut write_size = 0;
@@ -313,7 +313,7 @@ impl File for OSInode {
 #[inline]
 pub fn ch_dir(curr_path: &str, path: &str) -> isize {
     let curr_inode = get_current_inode(curr_path);
-    let path_split: Vec<&str> = path.split("/").collect();
+    let path_split: Vec<&str> = path.split("/").filter(|&s| !s.is_empty()).collect();
     match curr_inode.find_vfile_bypath(&path_split) {
         None => -1,
         Some(inode) => {
@@ -377,13 +377,13 @@ impl OpenFlags {
 
 pub fn list_apps() {
     println!("/**** APPS ****");
-    for app in ROOT_INODE.ls().unwrap() {
+    for app in ROOT_INODE.ls_lite().unwrap() {
         println!("{}", app.0);
     }
     println!("**************/")
 }
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum FileType {
     Dir,
     Regular,
@@ -408,28 +408,39 @@ pub fn open_file(
     let (readable, writable) = flags.read_write();
     let abs_path = get_abs_path(work_path, path);
     
-    //if let Some(vfile) = search_vfile(&abs_path) {
+    //    if flags.contains(OpenFlags::TRUNC) {
+    //        vfile.clear();
+    //    }
     //    return Some(Arc::new(OSInode::new(readable, writable, vfile)));
     //}
     
     let cur_inode = get_current_inode(work_path);
-    let mut path_split: Vec<&str> = path.split('/').collect();
+    let mut path_split: Vec<&str> = path.split('/').filter(|&s| !s.is_empty()).collect();
+    
+    //特判空vec(空vec肯定是根目录)
+    if path_split.is_empty() {
+        return Some(Arc::new(OSInode::new(
+            readable,
+            writable,
+            ROOT_INODE.clone(),
+        )));
+    }
     
     //创建文件
     if flags.contains(OpenFlags::CREATE) {
         //如果文件存在删除对应文件
         if let Some(inode) = cur_inode.find_vfile_bypath(&path_split) {
-            if _type == FileType::Regular {
+            if !flags.contains(OpenFlags::DIRECTORY) {
+                //remove_vfile(&abs_path);
                 inode.remove();
             }
         }
-        
         let filename = path_split.pop().unwrap();
         let dir = cur_inode.find_vfile_bypath(&path_split).unwrap();
         let attr = _type.into();
         //创建文件
         dir.create(filename, attr).map(|inode| {
-            insert_vfile(&abs_path, inode.clone());
+            //insert_vfile(&abs_path, inode.clone());
             Arc::new(OSInode::new(readable, writable, inode))
         })
     } else {
@@ -437,7 +448,7 @@ pub fn open_file(
             if flags.contains(OpenFlags::TRUNC) {
                 inode.clear()
             }
-            insert_vfile(&abs_path, inode.clone());
+            //insert_vfile(&abs_path, inode.clone());
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
@@ -486,13 +497,13 @@ pub fn init_rootfs() {
         FileType::Dir,
     )
         .unwrap();
-    /*    let _null = open_file(
+    let _null = open_file(
         "/dev",
         "null",
         OpenFlags::CREATE | OpenFlags::DIRECTORY,
         FileType::Dir,
     )
-        .unwrap();*/
+        .unwrap();
     /*    let zero = open_file(
         "/dev",
         "zero",

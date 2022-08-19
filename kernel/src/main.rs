@@ -6,6 +6,7 @@
 #![feature(map_try_insert)]
 #![feature(map_first_last)]
 #![feature(bool_to_option)]
+#![feature(let_chains)]
 
 extern crate alloc;
 #[macro_use]

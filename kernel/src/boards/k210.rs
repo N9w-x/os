@@ -1,3 +1,6 @@
+use k210_soc::sysctl::clock;
+use k210_soc::sysctl::pll::PLL0;
+
 pub const CLOCK_FREQ: usize = 403000000 / 62;
 
 pub const MMIO: &[(usize, usize)] = &[
@@ -22,6 +25,7 @@ pub const MMIO: &[(usize, usize)] = &[
 pub type BlockDeviceImpl = crate::drivers::block::SDCardWrapper;
 
 pub fn device_init() {
+    k210_soc::sysctl::clock_enable(clock::PLL1);
     //unimplemented!();
 }
 

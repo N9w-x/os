@@ -10,7 +10,6 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-
 #[derive(Clone)]
 pub struct VFile {
     name: String,
@@ -55,35 +54,39 @@ impl VFile {
             block_device,
         }
     }
-    
+
     pub fn clear_cache(&self) {
         self.fs.cache_write_back();
     }
-    
+
     pub fn get_name(&self) -> &str {
         self.name.as_str()
     }
-    
+
     pub fn get_attribute(&self) -> u8 {
         self.attribute
     }
-    
+
     pub fn get_size(&self) -> u32 {
-        self.read_short_dirent(|se: &ShortDirEntry| se.get_size())
+        if !self.is_dir() {
+            self.read_short_dirent(|se: &ShortDirEntry| se.get_size())
+        } else {
+            0
+        }
     }
-    
+
     pub fn get_fs(&self) -> Arc<FAT32Manager> {
         self.fs.clone()
     }
-    
+
     pub fn is_dir(&self) -> bool {
         0 != (self.attribute & ATTRIBUTE_DIRECTORY)
     }
-    
+
     pub fn is_short(&self) -> bool {
         self.long_pos_vec.is_empty()
     }
-    
+
     pub fn read_short_dirent<V>(&self, f: impl FnOnce(&ShortDirEntry) -> V) -> V {
         if self.short_sector == 0 {
             let root_dirent = self.fs.get_root_dirent();
@@ -95,18 +98,18 @@ impl VFile {
                 self.block_device.clone(),
                 CacheMode::READ,
             )
-                .read()
-                .read(self.short_offset, f)
+            .read()
+            .read(self.short_offset, f)
         }
     }
-    
+
     fn modify_long_dirent<V>(&self, index: usize, f: impl FnOnce(&mut LongDirEntry) -> V) -> V {
         let (sector, offset) = self.long_pos_vec[index];
         get_info_cache(sector, self.block_device.clone(), CacheMode::READ)
             .write()
             .modify(offset, f)
     }
-    
+
     pub fn modify_short_dirent<V>(&self, f: impl FnOnce(&mut ShortDirEntry) -> V) -> V {
         if self.short_sector == 0 {
             //println!("[fs]: modify vroot dent");
@@ -119,24 +122,19 @@ impl VFile {
                 self.block_device.clone(),
                 CacheMode::READ,
             )
-                .write()
-                .modify(self.short_offset, f)
+            .write()
+            .modify(self.short_offset, f)
         }
     }
-    
+
     /* 返回sector和offset */
     pub fn get_pos(&self, offset: usize) -> (usize, usize) {
         let (_, sec, off) = self.read_short_dirent(|s_ent: &ShortDirEntry| {
-            s_ent.get_pos(
-                offset,
-                &self.fs,
-                &self.fs.get_fat(),
-                &self.block_device,
-            )
+            s_ent.get_pos(offset, &self.fs, &self.fs.get_fat(), &self.block_device)
         });
         (sec, off)
     }
-    
+
     fn find_long_name(&self, name: &str, dir_ent: &ShortDirEntry) -> Option<VFile> {
         let name_vec = self.fs.long_name_split(name);
         let mut offset: usize = 0;
@@ -241,7 +239,7 @@ impl VFile {
             }
         }
     }
-    
+
     fn find_short_name(&self, name: &str, dir_ent: &ShortDirEntry) -> Option<VFile> {
         let name_upper = name.to_ascii_uppercase();
         let mut short_ent = ShortDirEntry::empty();
@@ -275,16 +273,11 @@ impl VFile {
             }
         }
     }
-    
+
     /* 根据名称搜索当前目录下的文件 */
     pub fn find_vfile_byname(&self, name: &str) -> Option<VFile> {
         assert!(self.is_dir());
-        let mut name_and_ext: Vec<&str> = name.split('.').collect();
-        let name_ = name_and_ext[0];
-        if name_and_ext.len() == 1 {
-            name_and_ext.push("");
-        }
-        let ext_ = name_and_ext[1];
+        let (name_, ext_) = name.rsplit_once(".").unwrap_or((name, ""));
         // FAT32目录没有大小，只能搜，read_at已经做了完善的适配
         self.read_short_dirent(|short_ent: &ShortDirEntry| {
             if name_.len() > 8 || ext_.len() > 3 {
@@ -296,7 +289,7 @@ impl VFile {
             }
         })
     }
-    
+
     /* 根据路径递归搜索文件 */
     pub fn find_vfile_bypath(&self, path: &Vec<&str>) -> Option<Arc<VFile>> {
         if path.is_empty() {
@@ -304,18 +297,14 @@ impl VFile {
         }
         let mut current_vfile = self.clone();
         for &path_part in path {
-            if path_part.is_empty() || path_part == "." {
+            if path_part == "." {
                 continue;
             }
             current_vfile = current_vfile.find_vfile_byname(path_part)?;
         }
         Some(Arc::new(current_vfile))
     }
-    
-    /* WAITING 既然目录都没有大小，那暂时没必要做这个 */
-    #[allow(unused)]
-    fn decrease_size() {}
-    
+
     fn increase_size(&self, new_size: u32) {
         // TODO: return sth when cannot increase
         //println!("===================== in increase =======================");
@@ -328,8 +317,9 @@ impl VFile {
             //println!("oldsz > newsz");
             return;
         }
-        let needed =
-            self.fs.cluster_num_needed(old_size, new_size, self.is_dir(), first_cluster);
+        let needed = self
+            .fs
+            .cluster_num_needed(old_size, new_size, self.is_dir(), first_cluster);
         //println!("needed = {}", needed);
         if needed == 0 {
             if !self.is_dir() {
@@ -340,7 +330,7 @@ impl VFile {
             }
             return;
         }
-        
+
         //println!("first cluster = {} nxt = {}", first_cluster, manager_writer.get_fat().read().get_next_cluster(first_cluster, self.block_device.clone()));
         if let Some(cluster) = self.fs.alloc_cluster(needed) {
             //println!("*** cluster alloc = {}",cluster);
@@ -375,7 +365,7 @@ impl VFile {
             panic!("SD Card no space!!!");
         }
     }
-    
+
     /*
     pub fn set_first_cluster(&mut self, first_cluster:u32) {
         self.first_cluster = first_cluster;
@@ -383,7 +373,7 @@ impl VFile {
             se.set_first_cluster(first_cluster);
         });
     }*/
-    
+
     /* 在当前目录下创建文件 */
     pub fn create(&self, name: &str, attribute: u8) -> Option<Arc<VFile>> {
         // 检测同名文件
@@ -439,9 +429,9 @@ impl VFile {
             self.write_at(dirent_offset, short_ent.as_bytes_mut()),
             DIRENT_SZ
         );
-        
+
         // 如果是目录类型，需要创建.和..
-        
+
         if let Some(vfile) = self.find_vfile_byname(name) {
             if attribute & ATTRIBUTE_DIRECTORY != 0 {
                 let manager_reader = self.fs.clone();
@@ -451,7 +441,7 @@ impl VFile {
                 let mut par_dir = ShortDirEntry::new(&name_bytes, &ext_bytes, ATTRIBUTE_DIRECTORY);
                 drop(manager_reader);
                 par_dir.set_first_cluster(self.first_cluster());
-                
+
                 vfile.write_at(0, self_dir.as_bytes_mut());
                 vfile.write_at(DIRENT_SZ, par_dir.as_bytes_mut());
                 let first_cluster =
@@ -464,17 +454,17 @@ impl VFile {
             None
         }
     }
-    
+
     pub fn first_cluster(&self) -> u32 {
         self.read_short_dirent(|se: &ShortDirEntry| se.first_cluster())
     }
-    
+
     pub fn set_first_cluster(&self, clu: u32) {
         self.modify_short_dirent(|se: &mut ShortDirEntry| {
             se.set_first_cluster(clu);
         })
     }
-    
+
     /* 获取当前目录下的所有文件名以及属性，以Vector形式返回 */
     // 如果出现错误，返回None
     pub fn ls(&self) -> Option<Vec<(String, u8)>> {
@@ -560,7 +550,7 @@ impl VFile {
             }
         }
     }
-    
+
     /* 获取目录中offset处目录项的信息 TODO:之后考虑和stat复用
      * 返回<name, offset, firstcluster,attributes>
      */
@@ -615,7 +605,7 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-    
+
     /* 获取目录中offset处目录项的信息 TODO:之后考虑和stat复用
      * 返回<size, atime, mtime, ctime>
      */
@@ -644,7 +634,7 @@ impl VFile {
             )
         })
     }
-    
+
     /* ls精简版，上面那个又臭又长，但这个不保证可靠 */
     // DEBUG
     pub fn ls_lite(&self) -> Option<Vec<(String, u8)>> {
@@ -695,7 +685,7 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-    
+
     pub fn read_at(&self, offset: usize, buf: &mut [u8]) -> usize {
         self.read_short_dirent(|short_ent: &ShortDirEntry| {
             short_ent.read_at(
@@ -707,7 +697,7 @@ impl VFile {
             )
         })
     }
-    
+
     pub fn write_at(&self, offset: usize, buf: &[u8]) -> usize {
         self.increase_size((offset + buf.len()) as u32);
         self.modify_short_dirent(|short_ent: &mut ShortDirEntry| {
@@ -720,7 +710,7 @@ impl VFile {
             )
         })
     }
-    
+
     pub fn clear(&self) {
         // 难点:长名目录项也要修改
         let first_cluster: u32 = self.first_cluster();
@@ -744,7 +734,7 @@ impl VFile {
         self.fs.dealloc_cluster(all_clusters);
         //fs_reader.cache_write_back();
     }
-    
+
     /* 查找可用目录项，返回offset，簇不够也会返回相应的offset，caller需要及时分配 */
     fn find_free_dirent(&self) -> Option<usize> {
         if !self.is_dir() {
@@ -771,25 +761,25 @@ impl VFile {
             offset += DIRENT_SZ;
         }
     }
-    
+
     pub fn creation_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_creation_time())
     }
-    
+
     pub fn accessed_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_accessed_time())
     }
-    
+
     pub fn modification_time(&self) -> (u32, u32, u32, u32, u32, u32, u64) {
         self.read_short_dirent(|sde: &ShortDirEntry| sde.get_modification_time())
     }
-    
+
     pub fn set_delete_bit(&self) {
         self.modify_short_dirent(|se: &mut ShortDirEntry| {
             se.delete();
         })
     }
-    
+
     /* WAITING 目前只支持删除自己*/
     pub fn remove(&self) -> usize {
         //self.modify_short_dirent(|sdent: &mut ShortDirEntry|{
@@ -814,20 +804,4 @@ impl VFile {
         //self.fs.write().cache_write_back();
         all_clusters.len()
     }
-    
-    /* WAITING */
-    #[allow(unused)]
-    fn remove_file() {}
-    
-    /* WAITING */
-    #[allow(unused)]
-    fn remove_dir() {}
 }
-
-/* WAITING */
-#[allow(unused)]
-pub fn fcopy() {}
-
-/* WAITING */
-#[allow(unused)]
-pub fn fmove() {}
