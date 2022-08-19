@@ -86,7 +86,7 @@ pub fn sys_open(fd: isize, path: *const u8, flags: u32) -> isize {
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(FileDescriptor::Abstract(dev_fs));
         fd as isize
-    } else if path.starts_with("/var/tmp/") {
+    } else if path.starts_with("/var/tmp/") && path.len() >= 20 {
         let mut inner = process.inner_exclusive_access();
         let _type = if flags.contains(OpenFlags::DIRECTORY) {
             FileType::Dir
@@ -215,10 +215,10 @@ pub fn sys_mkdir(dir_fd: isize, path: *const u8, mode: u32) -> isize {
     let token = current_user_token();
     let pcb = current_process();
     let path = translated_str(token, path);
-    if path.starts_with("/var/tmp/") {
+    if path.starts_with("/var/tmp/") && path.len() >= 20 {
         return 0;
     }
-    
+
     match if WorkPath::is_abs_path(&path) {
         open_file(
             "/",
@@ -391,7 +391,7 @@ pub fn sys_unlink(fd: isize, path: *const u8, flags: u32) -> isize {
     let path = translated_str(token, path);
     let pcb = current_process();
     
-    if path.starts_with("/var/tmp/") {
+    if path.starts_with("/var/tmp/") && path.len() >= 20 {
         return 0;
     }
     
