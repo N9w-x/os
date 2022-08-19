@@ -7,7 +7,7 @@ use lazy_static::*;
 //pub use cache::{ENTRY_STATIC_DATA, TEST_SH_DATA};
 pub use context::TaskContext;
 pub use futex::*;
-pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle};
+pub use id::{KernelStack, kstack_alloc, pid_alloc, PidHandle, ustack_top_from_id};
 pub use info::CloneFlag;
 pub use manager::{
     add_task, fetch_task, pid2process, remove_from_pid2process, remove_from_tid2task, tid2task,

@@ -14,7 +14,7 @@ use crate::config::{
     AT_BASE, AT_CLKTCK, AT_EGID, AT_ENTRY, AT_EUID, AT_FLAGS, AT_GID, AT_HWCAP, AT_NOELF,
     AT_PAGESIZE, AT_PHDR, AT_PHENT, AT_PHNUM, AT_PLATFORM, AT_SECURE, AT_UID, CLOCK_FREQ,
     MAP_ANONYMOUS, MAP_FIXED, MEMORY_END, MMIO, PAGE_SIZE, SIGRETURN_TRAMPOLINE, TRAMPOLINE,
-    KERNEL_MEMORY_MAP_BASE, MEMORY_MAP_BASE, USER_STACK_BASE,
+    KERNEL_MEMORY_MAP_BASE, MEMORY_MAP_BASE, USER_STACK_TOP,
 };
 use crate::fs::{File, FileDescriptor, FileType, open_file, OpenFlags};
 use crate::mm::aux::AuxHeader;
@@ -301,8 +301,8 @@ impl MemorySet {
     }
     
     /// Include sections in elf and trampoline,
-    /// also returns user_sp_base and entry point.
-    /// return (memory set,user heap base, user stack base,exec entry )
+    /// also returns user_sp_top and entry point.
+    /// return (memory set,user stack top,exec entry )
     pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize, Vec<AuxHeader>) {
         let mut memory_set = Self::new_bare();
         // map trampoline
@@ -396,7 +396,7 @@ impl MemorySet {
         let max_end_va: VirtAddr = max_end_vpn.into();
         let mut user_heap_base: usize = max_end_va.into();
         user_heap_base += PAGE_SIZE;
-        let user_stack_base = USER_STACK_BASE;
+        let user_stack_top = USER_STACK_TOP;
         //memory_set.print_map_area();
 
         memory_set.heap_base = user_heap_base.into();
@@ -406,7 +406,7 @@ impl MemorySet {
 
         (
             memory_set,
-            user_stack_base,
+            user_stack_top,
             entry_point,
             auxv,
         )
@@ -701,7 +701,18 @@ impl MemorySet {
         }
         false
     }
-    
+
+    pub fn lazy_alloc_map_area(&mut self, va: VirtAddr) -> bool {
+        let start_va: VirtAddr = va.floor().into();
+        let end_va: VirtAddr = (start_va.0 + PAGE_SIZE).into();
+        self.insert_framed_area(
+            start_va,
+            end_va,
+            MapPermission::U | MapPermission::R | MapPermission::W
+        );
+        true
+    }
+
     /// 为所有页面分配内存并映射文件
     pub fn alloc_mmap_area(&mut self, va: VirtAddr, fd_table: &Vec<Option<FileDescriptor>>) {
         let vpn: VirtPageNum = va.floor();

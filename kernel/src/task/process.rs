@@ -249,7 +249,7 @@ impl ProcessControlBlock {
     //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point, _) = MemorySet::from_elf(elf_data);
+        let (memory_set, ustack_top, entry_point, _) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -290,14 +290,14 @@ impl ProcessControlBlock {
         // create a main thread, we should allocate ustack and trap_cx here
         let task = Arc::new(TaskControlBlock::new(
             Arc::clone(&process),
-            ustack_base,
+            ustack_top,
             true,
         ));
         insert_into_tid2task(task.gettid(), Arc::clone(&task));
         // prepare trap_cx of main thread
         let task_inner = task.inner_exclusive_access();
         let trap_cx = task_inner.get_trap_cx();
-        let ustack_top = task_inner.res.as_ref().unwrap().ustack_top();
+        // let ustack_top = task_inner.res.as_ref().unwrap().ustack_top();
         let kstack_top = task.kstack.get_top();
         drop(task_inner);
         *trap_cx = TrapContext::app_init_context(
@@ -320,8 +320,9 @@ impl ProcessControlBlock {
     /// Only support processes with a single thread.
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
+        self.inner_exclusive_access().memory_set = MemorySet::new_bare();
         // memory_set with elf program headers/trampoline/trap context/user stack/auxv
-        let (memory_set, ustack_base, entry_point, mut auxv) = MemorySet::from_elf(elf_data);
+        let (memory_set, ustack_top, entry_point, mut auxv) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
         //println!("heap base {:#x}", uheap_base);
         //println!("stack base {:#x}", ustack_base);
@@ -353,12 +354,12 @@ impl ProcessControlBlock {
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
         let mut task_inner = task.inner_exclusive_access();
-        task_inner.res.as_mut().unwrap().ustack_base = ustack_base;
+        task_inner.res.as_mut().unwrap().ustack_top = ustack_top;
         task_inner.res.as_mut().unwrap().alloc_user_res();
         task_inner.trap_cx_ppn = task_inner.res.as_mut().unwrap().trap_cx_ppn();
         // push arguments on user stack
 
-        let mut user_sp = task_inner.res.as_mut().unwrap().ustack_top();
+        let mut user_sp = ustack_top;
 
         //stack top
         //argc
@@ -536,7 +537,7 @@ impl ProcessControlBlock {
                 .res
                 .as_ref()
                 .unwrap()
-                .ustack_base(),
+                .ustack_top(),
             // here we do not allocate trap_cx or ustack again
             // but mention that we allocate a new kstack here
             false,
@@ -568,7 +569,7 @@ impl ProcessControlBlock {
                 .res
                 .as_ref()
                 .unwrap()
-                .ustack_base(),
+                .ustack_top(),
             true,
         ));
 

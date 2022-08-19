@@ -277,15 +277,15 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     //    println!("syscall_id: {}, args: {:x?} ,ret={}", syscall_id, args, ret);
     //}
     
-    if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
-        println!(
-            "{} args:{:x?}, pid: {} ret: {} ]",
-            color!(format!("syscall id: {}", syscall_id), INFO),
-            args,
-            current_process().getpid(),
-            ret
-        );
-    }
-    
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
+    //     println!(
+    //         "{} args:{:x?}, pid: {} ret: {} ]",
+    //         color!(format!("syscall id: {}", syscall_id), INFO),
+    //         args,
+    //         current_process().getpid(),
+    //         ret
+    //     );
+    // }
+
     ret
 }

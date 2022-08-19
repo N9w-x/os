@@ -6,7 +6,7 @@ use alloc::{
 use lazy_static::*;
 use spin::Mutex;
 
-use crate::config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
+use crate::{config::{KERNEL_STACK_SIZE, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE, USER_STACK_SIZE_MAX}, mm::VirtPageNum};
 use crate::mm::{KERNEL_SPACE, MapPermission, PhysPageNum, VirtAddr};
 
 use super::ProcessControlBlock;
@@ -123,7 +123,7 @@ pub struct TaskUserRes {
     // 线程标识符
     pub id: usize,
     // 进程内线程编号：0, 1, 2...
-    pub ustack_base: usize,
+    pub ustack_top: usize,
     pub process: Weak<ProcessControlBlock>,
 }
 
@@ -131,14 +131,14 @@ fn trap_cx_bottom_from_id(id: usize) -> usize {
     TRAP_CONTEXT_BASE - id * PAGE_SIZE
 }
 
-fn ustack_bottom_from_id(ustack_base: usize, id: usize) -> usize {
-    ustack_base + id * (PAGE_SIZE + USER_STACK_SIZE)
+pub fn ustack_top_from_id(ustack_top: usize, id: usize) -> usize {
+    ustack_top - id * (PAGE_SIZE + USER_STACK_SIZE_MAX)
 }
 
 impl TaskUserRes {
     pub fn new(
         process: Arc<ProcessControlBlock>,
-        ustack_base: usize,
+        ustack_top: usize,
         alloc_user_res: bool,
     ) -> Self {
         let tid = tid_alloc();
@@ -146,7 +146,7 @@ impl TaskUserRes {
         let task_user_res = Self {
             tid,
             id,
-            ustack_base,
+            ustack_top,
             process: Arc::downgrade(&process),
         };
         if alloc_user_res {
@@ -159,8 +159,8 @@ impl TaskUserRes {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
         // alloc user stack
-        let ustack_bottom = ustack_bottom_from_id(self.ustack_base, self.id);
-        let ustack_top = ustack_bottom + USER_STACK_SIZE;
+        let ustack_top = ustack_top_from_id(self.ustack_top, self.id);
+        let ustack_bottom = ustack_top - USER_STACK_SIZE;
         process_inner.memory_set.insert_framed_area(
             ustack_bottom.into(),
             ustack_top.into(),
@@ -181,10 +181,18 @@ impl TaskUserRes {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
         // dealloc ustack manually
-        let ustack_bottom_va: VirtAddr = ustack_bottom_from_id(self.ustack_base, self.id).into();
-        process_inner
-            .memory_set
-            .remove_area_with_start_vpn(ustack_bottom_va.into());
+        let ustack_top_va = ustack_top_from_id(self.ustack_top, self.id);
+        let mut va = ustack_top_va - USER_STACK_SIZE_MAX;
+        loop {
+            if va >= ustack_top_va {
+                break;
+            }
+            // lazy导致ustack可能由多个MapArea组成，因此需要依次释放
+            process_inner
+                .memory_set
+                .remove_area_with_start_vpn(VirtPageNum::from(VirtAddr::from(va)));
+            va += PAGE_SIZE;
+        }
         // dealloc trap_cx manually
         let trap_cx_bottom_va: VirtAddr = trap_cx_bottom_from_id(self.id).into();
         process_inner
@@ -223,11 +231,14 @@ impl TaskUserRes {
             .ppn()
     }
     
-    pub fn ustack_base(&self) -> usize {
-        self.ustack_base
-    }
     pub fn ustack_top(&self) -> usize {
-        ustack_bottom_from_id(self.ustack_base, self.id) + USER_STACK_SIZE
+        self.ustack_top
+    }
+    pub fn ustack_base(&self) -> usize {
+        // ustack_top_from_id(self.ustack_top, self.id) + USER_STACK_SIZE
+        // TODO delete it maybe
+        todo!();
+        0
     }
 }
 

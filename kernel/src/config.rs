@@ -1,7 +1,10 @@
 #[allow(unused)]
 pub use crate::board::{CLOCK_FREQ, MMIO};
 
-pub const USER_STACK_SIZE: usize = 4096 * 40;
+// 初始分配用户栈大小
+pub const USER_STACK_SIZE: usize = PAGE_SIZE * 5;
+// 用户栈最大值
+pub const USER_STACK_SIZE_MAX: usize = PAGE_SIZE * 40;
 //0x2000
 pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
 pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x100;
@@ -17,7 +20,7 @@ pub const TRAMPOLINE: usize = usize::MAX - PAGE_SIZE + 1;
 pub const SIGRETURN_TRAMPOLINE: usize = TRAMPOLINE - PAGE_SIZE;
 pub const TRAP_CONTEXT_BASE: usize = SIGRETURN_TRAMPOLINE - PAGE_SIZE;
 
-pub const USER_STACK_BASE: usize = 0x1_0000_0000;
+pub const USER_STACK_TOP: usize = 0x1_0000_0000;
 pub const MEMORY_MAP_BASE: usize = 0x8000_0000;
 
 pub const FD_MAX: usize = 128;
