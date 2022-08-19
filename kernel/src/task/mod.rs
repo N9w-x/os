@@ -93,15 +93,18 @@ pub fn unblock_task(task: Arc<TaskControlBlock>) {
 
 pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
     let token = current_user_token();
+
+    let clear_child_tid = current_task().unwrap().inner_exclusive_access().clear_child_tid;
+    if clear_child_tid != 0 {
+        *translated_refmut(token, clear_child_tid as *mut u32) = 0;
+        futex_wake(clear_child_tid, 1);
+    }
+
     let task = current_task().unwrap();
     let tid = task.gettid();
     let mut task_inner = task.inner_exclusive_access();
     let id = task_inner.res.as_ref().unwrap().id;
-    
-    if task_inner.clear_child_tid != 0 {
-        *translated_refmut(token, task_inner.clear_child_tid as *mut u32) = 0;
-        futex_wake(task_inner.clear_child_tid, 1);
-    }
+
     remove_from_tid2task(tid);
     
     // record exit code
