@@ -123,7 +123,6 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_GET_TIME_OF_DAY => sys_get_time_of_day(args[0] as *mut u64),
         SYSCALL_GETPID => sys_getpid(),
         SYSCALL_GET_PPID => sys_getppid(),
-        //SYSCALL_CLONE => sys_fork(),
         SYSCALL_IOCTL => sys_ioctl(args[0], args[1]),
         SYSCALL_CLONE => sys_clone(args[0], args[1], args[2], args[3], args[4]),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
@@ -248,19 +247,15 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             0
         } //_ => 0,
     };
-    //if [SYSCALL_WRITE, SYSCALL_READ].contains(&syscall_id).not() {
-    //    println!("syscall_id: {}, args: {:x?} ,ret={}", syscall_id, args, ret);
-    //}
-    
-    //if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
-    //    println!(
-    //        "{} args:{:x?}, pid: {} ret: {} ]",
-    //        color!(format!("syscall id: {}", syscall_id), INFO),
-    //        args,
-    //        current_process().getpid(),
-    //        ret
-    //    );
-    //}
-    
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
+    //     println!(
+    //         "{} args:{:x?}, pid: {} ret: {} ]",
+    //         color!(format!("syscall id: {}", syscall_id), INFO),
+    //         args,
+    //         current_process().getpid(),
+    //         ret
+    //     );
+    // }
+
     ret
 }

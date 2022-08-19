@@ -26,6 +26,8 @@ use crate::config::PAGE_SIZE;
 use crate::fs::{File, FileType, open_file, OpenFlags, OSInode};
 use crate::mm::{add_free, translated_refmut, UserBuffer, VirtPageNum, VirtAddr};
 
+use self::manager::block_task;
+
 mod context;
 mod futex;
 mod id;
@@ -78,17 +80,15 @@ pub fn block_current_and_run_next() {
     let mut inner = task.inner_exclusive_access();
     let task_cx_ptr = &mut inner.task_cx as *mut TaskContext;
     inner.task_status = TaskStatus::Blocking;
+    block_task(task.clone());
+    
     drop(inner);
     drop(task);
     schedule(task_cx_ptr);
 }
 
 pub fn unblock_task(task: Arc<TaskControlBlock>) {
-    let mut inner = task.inner_exclusive_access();
-    assert!(inner.task_status == TaskStatus::Blocking);
-    inner.task_status = TaskStatus::Ready;
-    drop(inner);
-    add_task(task);
+    manager::unblock_task(task);
 }
 
 pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
@@ -149,6 +149,16 @@ pub fn exit_current_and_run_next(exit_code: i32, is_exit_group: bool) {
         process_inner.memory_set.recycle_data_pages();
         // drop file descriptors
         process_inner.fd_table.clear();
+
+        let parent_task = process_inner
+            .parent
+            .as_ref()
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .inner_exclusive_access()
+            .get_task(0);
+        unblock_task(parent_task.clone());
     }
     // // 定时器停止计时
     // ITIMER_MANAGER.lock().remove_itimer(process.getpid());

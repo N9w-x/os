@@ -1,28 +1,38 @@
-use alloc::{collections::{BTreeMap, VecDeque}, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 
 use lazy_static::lazy_static;
 use spin::Mutex;
 
-use crate::{const_def, mm::translated_ref, task::{block_current_and_run_next, current_task, current_user_token, TaskControlBlock, unblock_task}};
+use crate::{
+    const_def,
+    mm::translated_ref,
+    task::{
+        block_current_and_run_next, current_task, current_user_token, unblock_task,
+        TaskControlBlock,
+    },
+};
 
-const_def!(FUTEX_WAIT,              0);
-const_def!(FUTEX_WAKE,              1);
-const_def!(FUTEX_FD,                2);
-const_def!(FUTEX_REQUEUE,		    3);
-const_def!(FUTEX_CMP_REQUEUE,       4);
-const_def!(FUTEX_WAKE_OP,           5);
-const_def!(FUTEX_LOCK_PI,		    6);
-const_def!(FUTEX_UNLOCK_PI,		    7);
-const_def!(FUTEX_TRYLOCK_PI,   	    8);
-const_def!(FUTEX_WAIT_BITSET,	    9);
-const_def!(FUTEX_PRIVATE,           128);
-const_def!(FUTEX_CLOCK_REALTIME,    256);
-const_def!(FUTEX_OP_MASK,           !(FUTEX_PRIVATE | FUTEX_CLOCK_REALTIME));
-
+const_def!(FUTEX_WAIT, 0);
+const_def!(FUTEX_WAKE, 1);
+const_def!(FUTEX_FD, 2);
+const_def!(FUTEX_REQUEUE, 3);
+const_def!(FUTEX_CMP_REQUEUE, 4);
+const_def!(FUTEX_WAKE_OP, 5);
+const_def!(FUTEX_LOCK_PI, 6);
+const_def!(FUTEX_UNLOCK_PI, 7);
+const_def!(FUTEX_TRYLOCK_PI, 8);
+const_def!(FUTEX_WAIT_BITSET, 9);
+const_def!(FUTEX_PRIVATE, 128);
+const_def!(FUTEX_CLOCK_REALTIME, 256);
+const_def!(FUTEX_OP_MASK, !(FUTEX_PRIVATE | FUTEX_CLOCK_REALTIME));
 
 lazy_static! {
     pub static ref FUTEX_MANAGER: Mutex<BTreeMap<usize, Futex>> =
-        unsafe{ Mutex::new(BTreeMap::new()) };
+        unsafe { Mutex::new(BTreeMap::new()) };
 }
 
 pub struct Futex {
@@ -136,9 +146,7 @@ pub fn futex_requeue(uaddr: usize, num_wake: usize, uaddr2: usize) -> usize {
         if futex.waiters() == 0 {
             futex_manager.remove(&uaddr);
         }
-        wake_queue.into_iter().for_each(|task| {
-            unblock_task(task)
-        });
+        wake_queue.into_iter().for_each(|task| unblock_task(task));
         // 重新阻塞
         let futex2 = if let Ok(futex2) = futex_manager.try_insert(uaddr2, Futex::new()) {
             futex2
@@ -150,7 +158,7 @@ pub fn futex_requeue(uaddr: usize, num_wake: usize, uaddr2: usize) -> usize {
             futex2_queue.push_back(task);
             futex2.waiters_inc();
         });
-        
+
         real_wake
     } else {
         0

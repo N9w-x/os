@@ -8,6 +8,7 @@ use super::{ProcessControlBlock, task, TaskControlBlock};
 
 pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
+    block_queue: VecDeque<Arc<TaskControlBlock>>,
 }
 
 /// A simple FIFO scheduler.
@@ -15,13 +16,17 @@ impl TaskManager {
     pub fn new() -> Self {
         Self {
             ready_queue: VecDeque::new(),
+            block_queue: VecDeque::new(),
         }
     }
-    pub fn add(&mut self, task: Arc<TaskControlBlock>) {
+    pub fn add_to_ready_queue(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
+    pub fn fetch_from_ready_queue(&mut self) -> Option<Arc<TaskControlBlock>> {
         self.ready_queue.pop_front()
+    }
+    pub fn add_to_block_queue(&mut self, task: Arc<TaskControlBlock>) {
+        self.block_queue.push_back(task);
     }
 }
 
@@ -35,11 +40,28 @@ lazy_static! {
 }
 
 pub fn add_task(task: Arc<TaskControlBlock>) {
-    TASK_MANAGER.lock().add(task);
+    TASK_MANAGER.lock().add_to_ready_queue(task);
 }
 
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
-    TASK_MANAGER.lock().fetch()
+    TASK_MANAGER.lock().fetch_from_ready_queue()
+}
+
+pub fn block_task(task: Arc<TaskControlBlock>) {
+    TASK_MANAGER.lock().add_to_block_queue(task);
+}
+
+pub fn unblock_task(task: Arc<TaskControlBlock>) {
+    let mut task_manager = TASK_MANAGER.lock();
+    if let Some((idx, t)) = task_manager
+        .block_queue
+        .iter()
+        .enumerate()
+        .find(|(_, t)| Arc::ptr_eq(t, &task))
+    {
+        task_manager.block_queue.remove(idx);
+        task_manager.add_to_ready_queue(task);
+    }
 }
 
 pub fn pid2process(pid: usize) -> Option<Arc<ProcessControlBlock>> {

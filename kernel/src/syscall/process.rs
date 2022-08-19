@@ -23,7 +23,7 @@ use crate::task::{
     add_task, ClearChildTid, CloneFlag, current_process, current_task,
     current_trap_cx, current_user_token, exit_current_and_run_next, ITIMER_MANAGER, ITimerVal,
     MAX_SIG, pid2process, SIG_BLOCK, SIG_DFL, SIG_SETMASK, SIG_UNBLOCK, SigAction, SigInfo, Signum,
-    suspend_current_and_run_next, tid2task, TimeSpec, TimeVal, UContext,
+    suspend_current_and_run_next, tid2task, TimeSpec, TimeVal, UContext, block_current_and_run_next,
 };
 use crate::timer::{get_time, get_time_ms, get_time_ns, get_time_us, NSEC_PER_SEC, USEC_PER_SEC};
 
@@ -334,7 +334,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32, options: isize) -> isize
         if !found || options == WNOHANG {
             return -EPERM;
         }
-        suspend_current_and_run_next();
+        block_current_and_run_next();
 
         //let process = current_process();
         //// find a child process

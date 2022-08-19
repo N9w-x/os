@@ -50,24 +50,18 @@ pub fn sys_futex(
     }
     
     let op = op & FUTEX_OP_MASK;
-    // println!("[futex] tid: {}, op: {:#X}, uaddr: {:#X}, val: {}", current_task().unwrap().gettid(), op, uaddr, val as isize);
-    let a = match op {
+    match op {
         FUTEX_WAIT => {
-            // println!("[futex] wait");
             futex_wait(uaddr, val, 0) as isize
         }
         FUTEX_WAKE => {
-            // println!("[futex] wake");
             futex_wake(uaddr, val) as isize
         }
         FUTEX_REQUEUE => {
-            // println!("[futex] requeue");
             futex_requeue(uaddr, val, uaddr2) as isize
         }
         _ => {
             unimplemented!("unsupported futex op: {:#x}", op);
         }
-    };
-    // println!("[futex] ret: {}", a);
-    a
+    }
 }

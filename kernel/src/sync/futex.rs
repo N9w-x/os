@@ -1,7 +1,17 @@
-use alloc::{collections::{BTreeMap, VecDeque}, vec::Vec, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 use lazy_static::lazy_static;
 
-use crate::{const_def, task::{TaskControlBlock, current_user_token, current_task, block_current_and_run_next, unblock_task}, mm::translated_ref};
+use crate::task::unblock_task;
+use crate::{
+    const_def,
+    mm::translated_ref,
+    task::{block_current_and_run_next, current_task, current_user_token, TaskControlBlock},
+};
+
 use super::UPIntrFreeCell;
 
 const_def!(FUTEX_WAIT,              0);
@@ -20,8 +30,8 @@ const_def!(FUTEX_OP_MASK,           !(FUTEX_PRIVATE | FUTEX_CLOCK_REALTIME));
 
 
 lazy_static! {
-    pub static ref FUTEX_MANAGER: UPIntrFreeCell<BTreeMap<usize, Futex>> = 
-        unsafe{ UPIntrFreeCell::new(BTreeMap::new()) };
+    pub static ref FUTEX_MANAGER: UPIntrFreeCell<BTreeMap<usize, Futex>> =
+        unsafe { UPIntrFreeCell::new(BTreeMap::new()) };
 }
 
 pub struct Futex {
@@ -33,7 +43,7 @@ impl Futex {
     pub fn new() -> Self {
         Self {
             waiters: unsafe { UPIntrFreeCell::new(0) },
-            chain: unsafe{ UPIntrFreeCell::new(VecDeque::new()) },
+            chain: unsafe { UPIntrFreeCell::new(VecDeque::new()) },
         }
     }
     pub fn waiters(&self) -> usize {
@@ -135,9 +145,7 @@ pub fn futex_requeue(uaddr: usize, num_wake: usize, uaddr2: usize) -> usize {
         if futex.waiters() == 0 {
             futex_manager.remove(&uaddr);
         }
-        wake_queue.into_iter().for_each(|task| {
-            unblock_task(task)
-        });
+        wake_queue.into_iter().for_each(|task| unblock_task(task));
         // 重新阻塞
         let futex2 = if let Ok(futex2) = futex_manager.try_insert(uaddr2, Futex::new()) {
             futex2
