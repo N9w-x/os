@@ -60,7 +60,7 @@ pub fn unblock_task(task: Arc<TaskControlBlock>) {
         .find(|(_, t)| Arc::ptr_eq(t, &task))
     {
         task_manager.block_queue.remove(idx);
-        task_manager.add_to_ready_queue(task);
+        task_manager.ready_queue.push_front(task);
     }
 }
 

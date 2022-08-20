@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use _core::mem::size_of;
+use _core::{mem::size_of, task};
 
 use bitflags::*;
 
@@ -212,71 +212,47 @@ impl UContext {
 }
 
 pub fn check_pending_signals() {
+    let task = current_task().unwrap();
+    let mut task_inner = task.inner_exclusive_access();
+    if task_inner.signals.contains(Signum::SIGSEGV) {
+        drop(task_inner);
+        drop(task);
+        call_user_signal_handler(11);
+    }
     // for signum in 1..=MAX_SIG {
     //     let can_handle = {
-    //         let signum = Signum::from_serial(signum).unwrap();
+    //         let signum = Signum::from_bits(1 << signum).unwrap();
     //         let process = current_process();
-    //         let mut inner = process.inner_exclusive_access();
+    //         let mut process_inner = process.inner_exclusive_access();
+    //         let task = current_task().unwrap();
+    //         let mut task_inner = task.inner_exclusive_access();
     
-    //         let is_waiting = inner.signals.contains(signum);
-    //         let is_masked = inner.signal_masks.contains(signum);
+    //         let is_waiting = task_inner.signals.contains(signum);
+    //         let is_masked = task_inner.signal_masks & signum.bits() != 0;
     
     //         // 当前正在处理的信号的sigaction是否被指定屏蔽该信号
     //         let is_sigaction_masked =
-    //             if let Some(sigaction) = inner.signal_actions.actions[inner.signal_handling] {
-    //                 sigaction.sa_mask.contains(signum)
+    //             if let Some(sigaction) = process_inner.signal_actions.actions[task_inner.signal_handling] {
+    //                 sigaction.sa_mask & signum.bits() != 0
     //             } else {
     //                 // 默认sigaction只屏蔽与自身相同的信号
-    //                 signum.bits as usize == inner.signal_handling
+    //                 signum.bits as usize == task_inner.signal_handling
     //             };
     
     //         is_waiting && !is_masked && !is_sigaction_masked
     //     };
-    
+        
     //     if can_handle {
-    //         match Signum::from_serial(signum) {
+    //         match Signum::from_bits(1 << signum) {
     //             Some(Signum::SIGKILL | Signum::SIGSTOP | Signum::SIGCONT) | None => {
     //                 call_kernel_signal_handler(signum)
     //             }
-    //             _ => call_user_signal_handler(signum),
+    //             _ => {
+    //                 call_user_signal_handler(signum)
+    //             }
     //         }
     //     }
     // }
-    
-    for signum in 1..=MAX_SIG {
-        let can_handle = {
-            let signum = Signum::from_bits(1 << signum).unwrap();
-            let process = current_process();
-            let mut process_inner = process.inner_exclusive_access();
-            let task = current_task().unwrap();
-            let mut task_inner = task.inner_exclusive_access();
-    
-            let is_waiting = task_inner.signals.contains(signum);
-            let is_masked = task_inner.signal_masks & signum.bits() != 0;
-    
-            // 当前正在处理的信号的sigaction是否被指定屏蔽该信号
-            let is_sigaction_masked =
-                if let Some(sigaction) = process_inner.signal_actions.actions[task_inner.signal_handling] {
-                    sigaction.sa_mask & signum.bits() != 0
-                } else {
-                    // 默认sigaction只屏蔽与自身相同的信号
-                    signum.bits as usize == task_inner.signal_handling
-                };
-    
-            is_waiting && !is_masked && !is_sigaction_masked
-        };
-        
-        if can_handle {
-            match Signum::from_bits(1 << signum) {
-                Some(Signum::SIGKILL | Signum::SIGSTOP | Signum::SIGCONT) | None => {
-                    call_kernel_signal_handler(signum)
-                }
-                _ => {
-                    call_user_signal_handler(signum)
-                }
-            }
-        }
-    }
 }
 
 pub fn handle_signals() {
@@ -333,7 +309,6 @@ pub fn call_user_signal_handler(signum: usize) {
     let mut task_inner = task.inner_exclusive_access();
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
-    
     if let Some(sigaction) = process_inner.signal_actions.actions[signum] {
         let trap_cx = task_inner.get_trap_cx();
         
@@ -346,7 +321,8 @@ pub fn call_user_signal_handler(signum: usize) {
         
         let sa_flags = sigaction.sa_flags;
         match sigaction.sa_handler {
-            SIG_IGN => {}
+            SIG_IGN => {
+            }
             SIG_DFL => {
                 // 默认处理，即杀死进程
                 task_inner.killed = true;
@@ -360,13 +336,12 @@ pub fn call_user_signal_handler(signum: usize) {
                 }
                 trap_cx.x[1] = __sigreturn as usize - __alltraps as usize + SIGRETURN_TRAMPOLINE;
                 trap_cx.x[10] = signum;
-                if sa_flags.contains(SaFlags::SA_SIGINFO) {
-                    let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
-                    trap_cx.x[2] -= size_of::<UContext>();
-                    trap_cx.x[12] = trap_cx.x[2];
-                    *translated_refmut(token, mc_pc_ptr as *mut u64) = trap_cx.sepc as u64;
-                }
-                // println!("[signal] tid: {} handler: {:#X}, signum: {}, old_pc: {:#X}, new_pc: {:#X}", task.gettid(), handler, signum, trap_cx.sepc, handler);
+                // if sa_flags.contains(SaFlags::SA_SIGINFO) {
+                //     let mc_pc_ptr = trap_cx.x[2] + UContext::pc_offset();
+                //     trap_cx.x[2] -= size_of::<UContext>();
+                //     trap_cx.x[12] = trap_cx.x[2];
+                //     *translated_refmut(token, mc_pc_ptr as *mut u64) = trap_cx.sepc as u64;
+                // }
                 trap_cx.sepc = handler;
             }
         }

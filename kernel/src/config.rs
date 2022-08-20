@@ -7,7 +7,7 @@ pub const USER_STACK_SIZE: usize = PAGE_SIZE * 5;
 pub const USER_STACK_SIZE_MAX: usize = PAGE_SIZE * 40;
 //0x2000
 pub const KERNEL_STACK_SIZE: usize = 4096 * 2;
-pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x100;
+pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x50;
 // pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 0x1000;
 pub const KERNEL_MEMORY_MAP_BASE: usize = 0x9000_0000;
 //

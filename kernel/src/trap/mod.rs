@@ -9,7 +9,7 @@ use riscv::register::{
 pub use context::TrapContext;
 pub use self::pagefault::{page_fault_handler, lazy_check};
 
-use crate::{config::TRAMPOLINE, mm::{translated_byte_buffer, translated_ref}};
+use crate::{config::TRAMPOLINE, mm::{translated_byte_buffer, translated_ref}, task::check_pending_signals};
 use crate::mm::{MapPermission, VirtAddr, VirtPageNum};
 use crate::syscall::syscall;
 use crate::task::{
@@ -126,12 +126,12 @@ pub fn trap_handler() -> ! {
             let is_store = [Trap::Exception(Exception::StoreFault), Trap::Exception(Exception::StorePageFault)].contains(&scause.cause());
 
             if !page_fault_handler(stval, is_store) {
-                println!(
-                    "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
-                    scause.cause(),
-                    stval,
-                    current_trap_cx().sepc
-                );
+                // println!(
+                //     "[kernel] {:?} in application, bad addr = {:#x} bad inst = {:#x}",
+                //     scause.cause(),
+                //     stval,
+                //     current_trap_cx().sepc
+                // );
                 current_add_signal(Signum::SIGSEGV);
                 // let process = current_process();
                 // process
@@ -171,13 +171,15 @@ pub fn trap_handler() -> ! {
         }
     }
     
-    handle_signals();
+    check_pending_signals();
+
+    // handle_signals();
     
     // check signals
-    if let Some((errno, msg)) = check_signals_of_current() {
-        println!("[kernel] {}", msg);
-        exit_current_and_run_next(errno, false);
-    }
+    // if let Some((errno, msg)) = check_signals_of_current() {
+    //     println!("[kernel] {}", msg);
+    //     exit_current_and_run_next(errno, false);
+    // }
     
     trap_return();
 }

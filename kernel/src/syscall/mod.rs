@@ -242,20 +242,20 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         }
         //_ => panic!("Unsupported syscall_id: {}", syscall_id),
         _ => {
-            let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
-            println!("{}", log);
+            // let log = color!(format!("unsupported syscall id {}", syscall_id), ERROR);
+            // println!("{}", log);
             0
         } //_ => 0,
     };
-    if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
-        println!(
-            "{} args:{:x?}, pid: {} ret: {} ]",
-            color!(format!("syscall id: {}", syscall_id), INFO),
-            args,
-            current_process().getpid(),
-            ret
-        );
-    }
+    // if ![SYSCALL_WRITE, SYSCALL_READ, SYSCALL_PPOLL, SYSCALL_WRITEV, SYSCALL_CLOCK_GETTIME, SYSCALL_GETRUSAGE].contains(&syscall_id) {
+    //     println!(
+    //         "{} args:{:x?}, pid: {} ret: {} ]",
+    //         color!(format!("syscall id: {}", syscall_id), INFO),
+    //         args,
+    //         current_process().getpid(),
+    //         ret
+    //     );
+    // }
     
     ret
 }
